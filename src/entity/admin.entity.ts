@@ -19,4 +19,16 @@ export class AdminEntity {
 
   @Column({ type: 'varchar', length: 45, nullable: true })
   role!: string;
+
+  @Column({ type: 'datetime', name: 'create_date' })
+  createDate!: Date;
+
+  @Column({ type: 'int', name: 'create_by', nullable: true })
+  createBy!: number;
+
+  @Column({ type: 'int', name: 'modify_by', nullable: true })
+  modifyBy!: number;
+
+  @Column({ type: 'datetime', name: 'modify_date', nullable: true })
+  modifyDate!: Date;
 }

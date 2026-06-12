@@ -1,5 +1,4 @@
-import { Injectable } from '@nestjs/common';
-import { CalculateDto } from '../dto/calculate.dto';
+import { Injectable, UnprocessableEntityException } from '@nestjs/common';
 import { AdminEntity } from 'src/entity/admin.entity';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -13,11 +12,6 @@ export class AdminService {
         private adminRepository: Repository<AdminEntity>,
     ) { }
 
-    calculate(request: CalculateDto): number {
-        const sum = request.numA + request.numB;
-        return sum;
-    }
-
     findAll(): Promise<AdminEntity[]> {
         return this.adminRepository.find();
     }
@@ -28,9 +22,25 @@ export class AdminService {
     }
 
     // สร้างผู้ใช้ใหม่
-    create(userData: Partial<AdminEntity>): Promise<AdminEntity> {
-        const newUser = this.adminRepository.create(userData);
-        return this.adminRepository.save(newUser);
+    async create(userData: Partial<AdminEntity>): Promise<AdminEntity> {
+        let newAdmin = new AdminEntity();
+        const admin = await this.adminRepository.findOneBy({ fname: userData.fname, lname: userData.lname });
+        if (admin) {
+            throw new UnprocessableEntityException(`แอดมิน: ${admin.fname} ${admin.lname} มีอยู่แล้ว`);
+        }
+        const adminByPhone = await this.adminRepository.findOneBy({ phone: userData.phone });
+        if (adminByPhone) {
+            throw new UnprocessableEntityException(`เบอร์โทรศัพท์: ${adminByPhone.phone} มีอยู่แล้ว`);
+        } else {
+            // 1. สร้าง Instance ของ Entity ก่อน
+            const adminToSave = this.adminRepository.create({
+                ...userData,
+                createDate: new Date(), // ในภาพของคุณพิมพ์ Date เป็น date ระวังเรื่องตัวพิมพ์เล็ก/ใหญ่ด้วยนะครับ
+            });
+            // 2. แล้วค่อยบันทึก
+            newAdmin = await this.adminRepository.save(adminToSave);
+        }
+        return newAdmin;
     }
 
     // ลบข้อมูลผู้ใช้
