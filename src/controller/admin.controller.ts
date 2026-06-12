@@ -26,7 +26,7 @@ export class AdminController {
 
     @Post('/update')
     update(@Body() userData: AdminCreateDto) {
-        return this.adminService.create(userData);
+        return this.adminService.update(userData);
     }
 
     @Post('/remove')

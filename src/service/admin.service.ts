@@ -43,8 +43,25 @@ export class AdminService {
         return newAdmin;
     }
 
+    async update(userData: Partial<AdminEntity>): Promise<AdminEntity> {
+        const admin = await this.adminRepository.findOneBy({ id: userData.id });
+        if (!admin) {
+            throw new UnprocessableEntityException(`ไม่พบแอดมินที่มี ID: ${userData.id}`);
+        }
+        const adminModify = this.adminRepository.merge(admin, {
+            ...userData,
+            modifyDate: new Date(),
+        });
+        Object.assign(admin, userData);
+        return await this.adminRepository.save(admin);
+    }
+
     // ลบข้อมูลผู้ใช้
     async remove(userData: AdminRemoveDto): Promise<void> {
+        const admin = await this.adminRepository.findOneBy({ id: userData.id });
+        if (!admin) {
+            throw new UnprocessableEntityException(`ไม่พบแอดมินที่มี ID: ${userData.id}`);
+        }
         await this.adminRepository.delete(userData.id);
     }
 }
