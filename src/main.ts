@@ -5,19 +5,19 @@ import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  // 1. ตั้งค่าพื้นฐานสำหรับหน้า Document
+  // เริ่มต้นตั้งค่า Swagger
   const config = new DocumentBuilder()
-    .setTitle('Smart Water Bill API')
-    .setDescription('API documentation for the water bill service')
-    .setVersion('1.0')
+    .setTitle('My API Documentation') // ชื่อ API ของคุณ
+    .setDescription('The API description') // คำอธิบาย
+    .setVersion('1.0') // เวอร์ชัน
+    .addBearerAuth() // เพิ่มระบบ Authentication (ถ้ามี)
     .build();
-
-  // 2. สร้าง Document จาก config
+    
   const document = SwaggerModule.createDocument(app, config);
   
-  // 3. ผูก Swagger UI ไว้ที่ path '/api-docs'
+  // กำหนด path สำหรับเข้าดู Swagger UI (ในตัวอย่างนี้คือ /api)
   SwaggerModule.setup('api', app, document);
 
-  await app.listen(process.env.PORT ?? 3000);
+  await app.listen(3000);
 }
 bootstrap();
