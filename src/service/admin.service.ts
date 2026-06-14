@@ -48,12 +48,26 @@ export class AdminService {
         if (!admin) {
             throw new UnprocessableEntityException(`ไม่พบแอดมินที่มี ID: ${userData.id}`);
         }
+
+        const fname = userData.fname ?? admin.fname;
+        const lname = userData.lname ?? admin.lname;
+        const phone = userData.phone ?? admin.phone;
+
+        const adminByName = await this.adminRepository.findOneBy({ fname, lname });
+        if (adminByName && adminByName.id !== admin.id) {
+            throw new UnprocessableEntityException(`แอดมิน: ${adminByName.fname} ${adminByName.lname} มีอยู่แล้ว`);
+        }
+
+        const adminByPhone = await this.adminRepository.findOneBy({ phone });
+        if (adminByPhone && adminByPhone.id !== admin.id) {
+            throw new UnprocessableEntityException(`เบอร์โทรศัพท์: ${adminByPhone.phone} มีอยู่แล้ว`);
+        }
+
         const adminModify = this.adminRepository.merge(admin, {
             ...userData,
             modifyDate: new Date(),
         });
-        Object.assign(admin, userData);
-        return await this.adminRepository.save(admin);
+        return await this.adminRepository.save(adminModify);
     }
 
     // ลบข้อมูลผู้ใช้
