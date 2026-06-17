@@ -5,6 +5,12 @@ import { AdminController } from './controller/admin.controller';
 import { AdminService } from './service/admin.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AdminEntity } from './entity/admin.entity';
+import { MemberEntity } from './entity/member.entity';
+import { MemberController } from './controller/member.controller';
+import { MemberService } from './service/member.service';
+import { MeterReadingEntity } from './entity/meter-reading.entity';
+import { MeterReadingController } from './controller/meter-reading.controller';
+import { MeterReadingService } from './service/meter-reading.service';
 
 @Module({
   imports: [
@@ -16,11 +22,11 @@ import { AdminEntity } from './entity/admin.entity';
       password: '',  // ใส่ password ของ MySQL
       database: 'water-bill-db',     // ใส่ชื่อฐานข้อมูลที่คุณสร้างไว้
       entities: [__dirname + '/**/*.entity{.ts,.js}'],
-      synchronize: false,     // แนะนำให้เปิด true แค่ตอน Dev (มันจะสร้างตารางให้ตาม Entity อัตโนมัติ)
+      synchronize: true,     // แนะนำให้เปิด true แค่ตอน Dev (มันจะสร้างตารางให้ตาม Entity อัตโนมัติ)
     }),
-    TypeOrmModule.forFeature([AdminEntity])
+    TypeOrmModule.forFeature([AdminEntity, MemberEntity, MeterReadingEntity])
   ],
-  controllers: [AppController, AdminController],
-  providers: [AppService, AdminService],
+  controllers: [AppController, AdminController, MemberController, MeterReadingController],
+  providers: [AppService, AdminService, MemberService, MeterReadingService],
 })
 export class AppModule {}

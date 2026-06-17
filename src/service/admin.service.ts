@@ -4,6 +4,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { AdminRemoveDto } from 'src/dto/admin-remove.dto';
 
+
 @Injectable()
 export class AdminService {
 
@@ -44,6 +45,10 @@ export class AdminService {
     }
 
     async update(userData: Partial<AdminEntity>): Promise<AdminEntity> {
+        if (!userData.id) {
+            throw new UnprocessableEntityException(`ต้องระบุ ID ของแอดมินที่ต้องการแก้ไข`);
+        }
+
         const admin = await this.adminRepository.findOneBy({ id: userData.id });
         if (!admin) {
             throw new UnprocessableEntityException(`ไม่พบแอดมินที่มี ID: ${userData.id}`);
