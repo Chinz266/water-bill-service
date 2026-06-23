@@ -48,14 +48,26 @@ export class MeterReadingsService {
     try {
       this.logger.log('Starting water meter OCR analysis (Parallel Passes)...');
 
-      // รันกระบวนการ OCR ทั้งแบบดั้งเดิม (No Threshold) และแบบขาวดำเข้มข้น (With Threshold) คู่ขนานกัน
-      const [candidatesPass1, candidatesPass2] = await Promise.all([
-        this.processOcrPass(imageBuffer, false),
-        this.processOcrPass(imageBuffer, true),
+      // Pass 3: เตรียมรูปเฉพาะสำหรับจับเลขในช่องแดง (Red-zone digits)
+      // แยก Red channel ออก → invert → ทำให้ตัวเลขขาว/อ่อนบนพื้นแดงกลายเป็นเลขเข้มบนพื้นสว่าง
+      const redChannelBuffer = await sharp(imageBuffer)
+        .resize({ width: 1200, withoutEnlargement: true })
+        .removeAlpha()
+        .extractChannel('red')
+        .negate()
+        .normalize()
+        .sharpen({ sigma: 1.5 })
+        .toBuffer();
+
+      // รันกระบวนการ OCR ทั้ง 3 แบบคู่ขนานกัน
+      const [candidatesPass1, candidatesPass2, candidatesPass3] = await Promise.all([
+        this.processOcrPass(imageBuffer, 'noThreshold'),
+        this.processOcrPass(imageBuffer, 'withThreshold'),
+        this.processOcrPass(redChannelBuffer, 'preProcessed'),
       ]);
 
-      // รวมผลลัพธ์ตัวเลือกตัวเลขทั้งหมดจากทั้งสอง Pass เข้าด้วยกัน
-      const allCandidates = [...candidatesPass1, ...candidatesPass2];
+      // รวมผลลัพธ์ตัวเลือกตัวเลขทั้งหมดจากทั้งสาม Pass เข้าด้วยกัน
+      const allCandidates = [...candidatesPass1, ...candidatesPass2, ...candidatesPass3];
 
       if (allCandidates.length > 0) {
         // เรียงลำดับตัวเลือกตามคะแนนที่ประเมินได้จริงจากมากไปน้อย
@@ -66,12 +78,13 @@ export class MeterReadingsService {
           this.logger.debug(`[Candidate #${idx + 1}] Text: "${c.text}" -> Clean digits: "${c.cleanDigits}" | Score: ${c.score.toFixed(1)}`);
         });
 
-        const finalNumber = parseInt(allCandidates[0].cleanDigits, 10);
-        this.logger.log(`OCR Successful! Selected reading: ${finalNumber} (Confidence score: ${allCandidates[0].score.toFixed(1)})`);
+        const cleanDigits = allCandidates[0].cleanDigits;
+        const paddedDigits = cleanDigits.padStart(7, '0');
+        this.logger.log(`OCR Successful! Selected reading: "${paddedDigits}" (Confidence score: ${allCandidates[0].score.toFixed(1)})`);
 
         return {
           success: true,
-          read_unit: finalNumber,
+          read_unit: paddedDigits,
           message: 'สกัดค่าตัวเลขสำเร็จ',
         };
       }
@@ -89,21 +102,29 @@ export class MeterReadingsService {
   }
 
   // ฟังก์ชันย่อยสำหรับรัน OCR ในแต่ละรอบ (Pass)
-  private async processOcrPass(imageBuffer: Buffer, useThreshold: boolean) {
-    // จัดเตรียมรูปภาพด้วย Sharp
-    let sharpPipeline = sharp(imageBuffer)
-      .resize({ width: 1200, withoutEnlargement: true })
-      .grayscale()
-      .normalize();
+  // passMode: 'noThreshold' = grayscale ปกติ, 'withThreshold' = grayscale+threshold, 'preProcessed' = ส่ง buffer มาพร้อมใช้เลย
+  private async processOcrPass(imageBuffer: Buffer, passMode: 'noThreshold' | 'withThreshold' | 'preProcessed') {
+    let processedImageBuffer: Buffer;
 
-    if (useThreshold) {
-      // เพิ่มความคมชัดขาว-ดำสูงสุดในรอบสอง
-      sharpPipeline = sharpPipeline.threshold(120);
+    if (passMode === 'preProcessed') {
+      // ใช้ buffer ที่เตรียมมาแล้ว (เช่น red channel inverted)
+      processedImageBuffer = imageBuffer;
+    } else {
+      // จัดเตรียมรูปภาพด้วย Sharp
+      let sharpPipeline = sharp(imageBuffer)
+        .resize({ width: 1200, withoutEnlargement: true })
+        .grayscale()
+        .normalize();
+
+      if (passMode === 'withThreshold') {
+        // เพิ่มความคมชัดขาว-ดำสูงสุดในรอบสอง
+        sharpPipeline = sharpPipeline.threshold(120);
+      }
+
+      processedImageBuffer = await sharpPipeline
+        .sharpen({ sigma: 1.5 })
+        .toBuffer();
     }
-
-    const processedImageBuffer = await sharpPipeline
-      .sharpen({ sigma: 1.5 })
-      .toBuffer();
 
     // เรียกใช้งาน Google Cloud Vision API
     const [visionResult] = await this.visionClient.documentTextDetection({
@@ -118,8 +139,9 @@ export class MeterReadingsService {
       return [];
     }
 
+    const passLabel = passMode === 'withThreshold' ? 'With Threshold' : passMode === 'noThreshold' ? 'No Threshold' : 'Red Channel';
     const rawText = detections[0].description || '';
-    this.logger.debug(`[Pass ${useThreshold ? 'With Threshold' : 'No Threshold'}] Raw text detected: "${rawText.replace(/\n/g, ' | ')}"`);
+    this.logger.debug(`[Pass ${passLabel}] Raw text detected: "${rawText.replace(/\n/g, ' | ')}"`);
 
     // เริ่มต้นค้นหาและวิเคราะห์ความน่าจะเป็นของตัวเลขมิเตอร์ (Candidate Scoring)
     const rawBlocks: { text: string; cleanDigits: string; minX: number; maxX: number; minY: number; maxY: number; cx: number; cy: number; det: any }[] = [];
@@ -186,7 +208,7 @@ export class MeterReadingsService {
       }
     }
 
-    this.logger.debug(`[Pass ${useThreshold ? 'With Threshold' : 'No Threshold'}] Extracted ${rawBlocks.length} raw numeric blocks.`);
+    this.logger.debug(`[Pass ${passLabel}] Extracted ${rawBlocks.length} raw numeric blocks.`);
 
 
     // [เพิ่มใหม่] ลอจิกการผสานคำตัวเลขที่อยู่ใกล้กันแนวนอน (เช่น "002" และ "5" ให้รวมเป็น "0025")
@@ -211,7 +233,7 @@ export class MeterReadingsService {
 
         // ตรวจสอบระยะห่างแนวนอน (Horizontal Gap)
         const horizontalGap = next.minX - current.maxX;
-        const isCloseHorizontally = horizontalGap >= -10 && horizontalGap < 60; // ชิดกันหรือห่างไม่เกิน 60px
+        const isCloseHorizontally = horizontalGap >= -10 && horizontalGap < 100; // ชิดกันหรือห่างไม่เกิน 100px (เพิ่มจาก 60px เพื่อข้ามเส้นแบ่งช่องแดง/ดำ)
 
         if (hasVerticalOverlap && isCloseHorizontally) {
           // ทำการผสานตัวเลข
@@ -234,7 +256,7 @@ export class MeterReadingsService {
       mergedBlocks.push(current);
     }
 
-    this.logger.debug(`[Pass ${useThreshold ? 'With Threshold' : 'No Threshold'}] Horizontally merged adjacent text segments into ${mergedBlocks.length} blocks.`);
+    this.logger.debug(`[Pass ${passLabel}] Horizontally merged adjacent text segments into ${mergedBlocks.length} blocks.`);
 
     // ประเมินและให้คะแนนบล็อกตัวเลขแต่ละตัวที่ผสานแล้ว
     const candidates: { text: string; cleanDigits: string; score: number }[] = [];
