@@ -8,9 +8,18 @@ import { AdminEntity } from './entity/admin.entity';
 import { MemberEntity } from './entity/member.entity';
 import { MemberController } from './controller/member.controller';
 import { MemberService } from './service/member.service';
+import { WaterRatesController } from './controller/water-rates.controller';
+import { WaterRatesService } from './service/water-rates.service';
+import { WaterRateEntity } from './entity/water-rate.entity';
+import { VillagesController } from './controller/villages.controller';
+import { VillagesService } from './service/villages.service';
+import { VillageEntity } from './entity/village.entity';
 import { MeterReadingEntity } from './entity/meter-reading.entity';
-import { MeterReadingController } from './controller/meter-reading.controller';
-import { MeterReadingService } from './service/meter-reading.service';
+import { MeterReadingsController } from './controller/meter-readings.controller';
+import { MeterReadingsService } from './service/meter-readings.service';
+import { BillEntity } from './entity/bill.entity';
+import { BillsService } from './service/bills.service';
+import { BillsController } from './controller/bills.controller';
 
 @Module({
   imports: [
@@ -24,9 +33,9 @@ import { MeterReadingService } from './service/meter-reading.service';
       entities: [__dirname + '/**/*.entity{.ts,.js}'],
       synchronize: true,     // แนะนำให้เปิด true แค่ตอน Dev (มันจะสร้างตารางให้ตาม Entity อัตโนมัติ)
     }),
-    TypeOrmModule.forFeature([AdminEntity, MemberEntity, MeterReadingEntity])
+    TypeOrmModule.forFeature([AdminEntity, MemberEntity, WaterRateEntity, VillageEntity, MeterReadingEntity, BillEntity ])
   ],
-  controllers: [AppController, AdminController, MemberController, MeterReadingController],
-  providers: [AppService, AdminService, MemberService, MeterReadingService],
+  controllers: [AppController, AdminController, MemberController, WaterRatesController, VillagesController, MeterReadingsController, BillsController],
+  providers: [AppService, AdminService, MemberService, WaterRatesService, VillagesService, MeterReadingsService, BillsService],
 })
 export class AppModule {}

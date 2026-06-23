@@ -1,31 +1,31 @@
-import { Entity, Column, PrimaryGeneratedColumn } from 'typeorm';
+import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn } from 'typeorm';
 
 @Entity('meter_readings')
 export class MeterReadingEntity {
   @PrimaryGeneratedColumn()
   id!: number;
 
-  @Column({ type: 'date', name: 'reading_date', nullable: true })
-  readingDate!: Date;
+  @Column({ type: 'date' })
+  reading_date!: Date;
 
-  @Column({ type: 'int', name: 'meter_unit', nullable: true })
-  meterUnit!: number;
+  @Column('int')
+  meter_unit!: number; // หน่วยค่าน้ำที่จดได้ (หรือที่ OCR อ่านได้)
 
-  @Column({ type: 'varchar', length: 100, name: 'evidence_photo', nullable: true })
-  evidencePhoto!: string;
+  @Column({ length: 100, nullable: true })
+  evidence_photo!: string; // Path หรือ URL ของรูปถ่ายมิเตอร์น้ำ
 
-  @Column({ type: 'int', name: 'members_id', nullable: true })
-  membersId!: number;
+  @Column()
+  members_id!: number; // ID ของลูกบ้าน
 
-  @Column({ type: 'datetime', name: 'create_date' })
-  createDate!: Date;
+  @Column()
+  create_by!: number;
 
-  @Column({ type: 'int', name: 'create_by', nullable: true })
-  createBy!: number;
+  @CreateDateColumn()
+  create_date!: Date;
 
-  @Column({ type: 'datetime', name: 'modify_date', nullable: true })
-  modifyDate!: Date;
+  @Column({ nullable: true })
+  modify_by!: number;
 
-  @Column({ type: 'int', name: 'modify_by', nullable: true })
-  modifyBy!: number;
+  @UpdateDateColumn()
+  modify_date!: Date;
 }

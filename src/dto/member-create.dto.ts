@@ -1,21 +1,27 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
-export class MemberCreateDto {
-    @ApiProperty({ description: 'ID of the member', example: 1 })
-    id!: number;
+export class CreateMemberDto {
+  @ApiProperty({ description: 'ชื่อจริง', example: 'สมชาย' })
+  fname!: string;
 
-    @ApiProperty({ description: 'First name of the member', example: 'Somchai' })
-    fname!: string;
+  @ApiProperty({ description: 'นามสกุล', example: 'ใจดี' })
+  lname!: string;
 
-    @ApiProperty({ description: 'Last name of the member', example: 'Jaidee' })
-    lname!: string;
+  @ApiProperty({ description: 'บ้านเลขที่', example: '99/9' })
+  house_no!: string;
 
-    @ApiProperty({ description: 'Phone number of the member', example: '0812345678' })
-    phone!: string;
+  @ApiPropertyOptional({ description: 'เบอร์โทรศัพท์', example: '0812345678' })
+  phone?: string;
 
-    @ApiProperty({ description: 'Address of the member', example: '123/45 Bangkok' })
-    address!: string;
+  @ApiPropertyOptional({ description: 'ละติจูด (พิกัดแผนที่บ้าน)', example: 14.979900 })
+  latitude?: number;
 
-    @ApiProperty({ description: 'Status of the member', example: 'active' })
-    status!: string;
+  @ApiPropertyOptional({ description: 'ลองจิจูด (พิกัดแผนที่บ้าน)', example: 102.097771 })
+  longitude?: number;
+
+  @ApiProperty({ description: 'ID ของหมู่บ้านที่ลูกบ้านอาศัยอยู่', example: 1 })
+  villages_id!: number;
+
+  @ApiProperty({ description: 'ID ของ Admin ผู้บันทึกข้อมูล', example: 1 })
+  create_by!: number;
 }

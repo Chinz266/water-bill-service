@@ -1,7 +1,7 @@
 import { Body, Controller, Post } from '@nestjs/common';
 import { MemberService } from 'src/service/member.service';
-import { MemberCreateDto } from 'src/dto/member-create.dto';
 import { MemberRemoveDto } from 'src/dto/member-remove.dto';
+import { CreateMemberDto } from 'src/dto/member-create.dto';
 
 @Controller('member')
 export class MemberController {
@@ -18,12 +18,12 @@ export class MemberController {
     }
 
     @Post('/create')
-    create(@Body() userData: MemberCreateDto) {
+    create(@Body() userData: CreateMemberDto) {
         return this.memberService.create(userData);
     }
 
     @Post('/update')
-    update(@Body() userData: MemberCreateDto) {
+    update(@Body() userData: CreateMemberDto) {
         return this.memberService.update(userData);
     }
 
