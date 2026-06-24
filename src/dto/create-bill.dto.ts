@@ -33,6 +33,6 @@ export class CreateBillDto {
   })
   payment_status?: 'PENDING' | 'PAID' | 'OVERDUE';
 
-  @ApiProperty({ description: 'ID ของ Admin ผู้สร้างบิล', example: 1 })
-  create_by!: number;
+  @ApiPropertyOptional({ description: 'ID ของ Admin ผู้สร้างบิล', example: 1 })
+  create_by?: number;
 }

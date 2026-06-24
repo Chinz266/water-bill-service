@@ -17,8 +17,8 @@ export class MeterReadingEntity {
   @Column()
   members_id!: number; // ID ของลูกบ้าน
 
-  @Column()
-  create_by!: number;
+  @Column({ nullable: true })
+  create_by?: number;
 
   @CreateDateColumn()
   create_date!: Date;

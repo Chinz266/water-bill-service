@@ -13,6 +13,6 @@ export class CreateMeterReadingDto {
   @ApiProperty({ description: 'ID ของลูกบ้าน (เจ้าของมิเตอร์)', example: 1 })
   members_id!: number;
 
-  @ApiProperty({ description: 'ID ของพนักงาน/Admin ที่จดข้อมูล', example: 1 })
-  create_by!: number;
+  @ApiPropertyOptional({ description: 'ID ของพนักงาน/Admin ที่จดข้อมูล', example: 1 })
+  create_by?: number;
 }
