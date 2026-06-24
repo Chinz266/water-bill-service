@@ -10,10 +10,10 @@ export class BillsService {
   constructor(
     @InjectRepository(BillEntity)
     private readonly billRepository: Repository<BillEntity>,
-    
+
     @InjectRepository(WaterRateEntity)
     private readonly waterRateRepository: Repository<WaterRateEntity>, // เรียกใช้ตารางเรทค่าน้ำ
-  ) {}
+  ) { }
 
   // ฟังก์ชันสร้างบิลพร้อมคำนวณอัตโนมัติ
   async create(createBillDto: CreateBillDto) {
@@ -60,5 +60,18 @@ export class BillsService {
       throw new NotFoundException(`ไม่พบบิลหมายเลข ${id}`);
     }
     return bill;
+  }
+
+  async updateStatus(id: number, payment_status: string) {
+    // ใช้ as any เพื่อบอก TypeScript ว่าไม่ต้องห่วงเรื่อง Type
+    await this.billRepository.update(id, { payment_status: payment_status as any });
+
+    return await this.billRepository.findOne({ where: { id } });
+  }
+
+  async remove(id: number) {
+    // สั่งลบข้อมูลตาม ID จากตาราง
+    await this.billRepository.delete(id);
+    return { message: `ลบบิล ID ${id} สำเร็จเรียบร้อย!` };
   }
 }

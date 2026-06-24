@@ -16,8 +16,8 @@ export class CreateBillDto {
 //   @ApiProperty({ description: 'หน่วยน้ำที่ใช้ไป (เดือนนี้ - เดือนที่แล้ว)', example: 50 })
 //   usage_unit!: number;
 
-  @ApiProperty({ description: 'ยอดรวมที่ต้องชำระ (บาท)', example: 750.00 })
-  total_amount!: number;
+  // @ApiProperty({ description: 'ยอดรวมที่ต้องชำระ (บาท)', example: 750.00 })
+  // total_amount!: number;
 
   @ApiProperty({ description: 'บิลประจำเดือน (เช่น 01-12)', example: '06' })
   billing_month!: string;
