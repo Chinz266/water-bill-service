@@ -44,7 +44,7 @@ export class MemberService {
         // 1. สร้าง Instance ของ Entity ก่อน
             const memberToSave = this.memberRepository.create({
                 ...userData,
-                createDate: new Date(),
+                craeta_date: new Date(),
             });
             // 2. แล้วค่อยบันทึก
             newMember = await this.memberRepository.save(memberToSave);
@@ -78,7 +78,7 @@ export class MemberService {
 
         const memberModify = this.memberRepository.merge(member, {
             ...userData,
-            modifyDate: new Date(),
+            modify_date: new Date(),
         });
         return await this.memberRepository.save(memberModify);
     }

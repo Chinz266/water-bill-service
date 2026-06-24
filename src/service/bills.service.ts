@@ -33,7 +33,7 @@ export class BillsService {
 
     // 3. คำนวณหาหน่วยที่ใช้ไป และยอดเงินรวม
     const usage_unit = createBillDto.current_unit - createBillDto.previous_unit;
-    const total_amount = usage_unit * rate.price_per_unit;
+    const total_amount = usage_unit * 10
 
     // 4. นำข้อมูลมาผูกรวมกัน โดยบังคับใช้ยอดที่เราคำนวณเอง
     const newBill = this.billRepository.create({

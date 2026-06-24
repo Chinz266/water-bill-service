@@ -18,7 +18,7 @@ export class MeterReadingsService {
   constructor(
     @InjectRepository(MeterReadingEntity)
     private readonly meterReadingRepository: Repository<MeterReadingEntity>,
-  ) {}
+  ) { }
 
   // ==========================================
   // --- ส่วนฟังก์ชัน CRUD ปกติ ---
@@ -94,7 +94,7 @@ export class MeterReadingsService {
 
       if (allCandidates.length > 0) {
         allCandidates.sort((a, b) => b.score - a.score);
-        
+
         this.logger.log(`Evaluating ${allCandidates.length} OCR candidates across all passes...`);
         allCandidates.slice(0, 5).forEach((c, idx) => {
           this.logger.debug(`[Candidate #${idx + 1}] Text: "${c.text}" -> Clean digits: "${c.cleanDigits}" | Score: ${c.score.toFixed(1)}`);
@@ -118,7 +118,11 @@ export class MeterReadingsService {
         message: 'วิเคราะห์ภาพแล้ว แต่ได้ตัวเลขไม่ครบถ้วน กรุณาถ่ายให้ชัดเจนขึ้น',
       };
     } catch (error) {
-      this.logger.error('An error occurred during water meter OCR analysis:', error.stack || error.message || error);
+      if (error instanceof Error) {
+        this.logger.error('An error occurred during water meter OCR analysis:', error.stack || error.message);
+      } else {
+        this.logger.error('An error occurred during water meter OCR analysis:', error);
+      }
       throw new BadRequestException('ระบบวิเคราะห์รูปภาพมีปัญหา กรุณาลองใหม่อีกครั้ง');
     }
   }
@@ -250,7 +254,7 @@ export class MeterReadingsService {
         const currentHeight = current.maxY - current.minY;
         const nextHeight = next.maxY - next.minY;
 
-        const hasVerticalOverlap = overlapHeight > 0 && 
+        const hasVerticalOverlap = overlapHeight > 0 &&
           ((overlapHeight / Math.min(currentHeight, nextHeight)) > 0.2 || overlapHeight >= 5);
 
         // ตรวจสอบระยะห่างแนวนอน (Horizontal Gap)

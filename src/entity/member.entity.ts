@@ -1,34 +1,44 @@
-import { Entity, Column, PrimaryGeneratedColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
 
-@Entity('member')
+@Entity('members') // 🌟 อย่าลืมเช็คชื่อตารางอีกรอบนะครับ
 export class MemberEntity {
-  @PrimaryGeneratedColumn()
+  
+  @PrimaryGeneratedColumn({ type: 'int' })
   id!: number;
 
-  @Column({ type: 'varchar', length: 45, nullable: true })
+  // 🌟 เปลี่ยนกลับมาใช้ชื่อ fname และ lname ให้ตรงกับที่ Service เรียกหา
+  @Column({ name: 'fname', type: 'varchar', length: 45, nullable: true })
   fname!: string;
 
-  @Column({ type: 'varchar', length: 45, nullable: true })
+  @Column({ name: 'lname', type: 'varchar', length: 45, nullable: true })
   lname!: string;
 
-  @Column({ type: 'varchar', length: 20, nullable: true })
+  // 🌟 ปรับตัวแปรอื่นๆ ให้เป็น snake_case ตามโค้ดเดิมของลูกพี่เลยครับ จะได้ไม่พังจุดอื่น
+  @Column({ name: 'house_no', type: 'varchar', length: 45, nullable: true })
+  house_no!: string;
+
+  @Column({ name: 'phone', type: 'varchar', length: 20, nullable: true })
   phone!: string;
 
-  @Column({ type: 'text', nullable: true })
-  address!: string;
+  @Column({ name: 'latitude', type: 'decimal', precision: 10, scale: 8, nullable: true })
+  latitude!: number;
 
-  @Column({ type: 'varchar', length: 20, default: 'active' })
-  status!: string;
+  @Column({ name: 'longitude', type: 'decimal', precision: 10, scale: 8, nullable: true })
+  longitude!: number;
 
-  @Column({ type: 'datetime', name: 'create_date' })
-  createDate!: Date;
+  @Column({ name: 'villages_id', type: 'int' })
+  villages_id!: number;
 
-  @Column({ type: 'int', name: 'create_by', nullable: true })
-  createBy!: number;
+  @Column({ name: 'craeta_date', type: 'date' })
+  craeta_date!: Date;
 
-  @Column({ type: 'int', name: 'modify_by', nullable: true })
-  modifyBy!: number;
+  @Column({ name: 'craete_by', type: 'int' })
+  craete_by!: number;
 
-  @Column({ type: 'datetime', name: 'modify_date', nullable: true })
-  modifyDate!: Date;
+  @Column({ name: 'modify_by', type: 'int', nullable: true })
+  modify_by!: number;
+
+  @Column({ name: 'modify_date', type: 'date', nullable: true })
+  modify_date!: Date;
+  
 }
