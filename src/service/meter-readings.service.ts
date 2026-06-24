@@ -46,10 +46,34 @@ export class MeterReadingsService {
   // ==========================================
   async extractMeterUnit(imageBuffer: Buffer) {
     try {
-      this.logger.log('Starting water meter OCR analysis (Parallel Passes)...');
+      const startTime = Date.now();
+      this.logger.log('Starting water meter OCR analysis...');
 
-      // Pass 3: เตรียมรูปเฉพาะสำหรับจับเลขในช่องแดง (Red-zone digits)
-      // แยก Red channel ออก → invert → ทำให้ตัวเลขขาว/อ่อนบนพื้นแดงกลายเป็นเลขเข้มบนพื้นสว่าง
+      // === Pass 1: Grayscale ปกติ (เร็วที่สุด ใช้บ่อยที่สุด) ===
+      const pass1Start = Date.now();
+      const candidatesPass1 = await this.processOcrPass(imageBuffer, 'noThreshold');
+      this.logger.log(`Pass 1 (Grayscale) completed in ${Date.now() - pass1Start}ms, found ${candidatesPass1.length} candidates`);
+
+      // Early exit: ถ้า Pass 1 ได้ผลที่มั่นใจสูง ไม่ต้องรัน Pass 2, 3 ให้เสียเวลา
+      const HIGH_CONFIDENCE_THRESHOLD = 300;
+      const bestPass1 = candidatesPass1.length > 0
+        ? candidatesPass1.reduce((best, c) => c.score > best.score ? c : best, candidatesPass1[0])
+        : null;
+
+      if (bestPass1 && bestPass1.score >= HIGH_CONFIDENCE_THRESHOLD) {
+        const paddedDigits = bestPass1.cleanDigits.padStart(7, '0');
+        this.logger.log(`⚡ Fast path! High-confidence result from Pass 1: "${paddedDigits}" (Score: ${bestPass1.score.toFixed(1)}) in ${Date.now() - startTime}ms total`);
+        return {
+          success: true,
+          read_unit: paddedDigits,
+          message: 'สกัดค่าตัวเลขสำเร็จ',
+        };
+      }
+
+      // === Pass 2 & 3: รันคู่ขนานเฉพาะเมื่อ Pass 1 ไม่มั่นใจพอ ===
+      this.logger.log(`Pass 1 best score: ${bestPass1?.score.toFixed(1) ?? 'N/A'} (< ${HIGH_CONFIDENCE_THRESHOLD}), running additional passes...`);
+
+      const pass2Start = Date.now();
       const redChannelBuffer = await sharp(imageBuffer)
         .resize({ width: 1200, withoutEnlargement: true })
         .removeAlpha()
@@ -59,28 +83,26 @@ export class MeterReadingsService {
         .sharpen({ sigma: 1.5 })
         .toBuffer();
 
-      // รันกระบวนการ OCR ทั้ง 3 แบบคู่ขนานกัน
-      const [candidatesPass1, candidatesPass2, candidatesPass3] = await Promise.all([
-        this.processOcrPass(imageBuffer, 'noThreshold'),
+      const [candidatesPass2, candidatesPass3] = await Promise.all([
         this.processOcrPass(imageBuffer, 'withThreshold'),
         this.processOcrPass(redChannelBuffer, 'preProcessed'),
       ]);
+      this.logger.log(`Pass 2 & 3 completed in ${Date.now() - pass2Start}ms`);
 
       // รวมผลลัพธ์ตัวเลือกตัวเลขทั้งหมดจากทั้งสาม Pass เข้าด้วยกัน
       const allCandidates = [...candidatesPass1, ...candidatesPass2, ...candidatesPass3];
 
       if (allCandidates.length > 0) {
-        // เรียงลำดับตัวเลือกตามคะแนนที่ประเมินได้จริงจากมากไปน้อย
         allCandidates.sort((a, b) => b.score - a.score);
         
-        this.logger.log(`Evaluating ${allCandidates.length} OCR candidates across passes...`);
-        allCandidates.forEach((c, idx) => {
+        this.logger.log(`Evaluating ${allCandidates.length} OCR candidates across all passes...`);
+        allCandidates.slice(0, 5).forEach((c, idx) => {
           this.logger.debug(`[Candidate #${idx + 1}] Text: "${c.text}" -> Clean digits: "${c.cleanDigits}" | Score: ${c.score.toFixed(1)}`);
         });
 
         const cleanDigits = allCandidates[0].cleanDigits;
         const paddedDigits = cleanDigits.padStart(7, '0');
-        this.logger.log(`OCR Successful! Selected reading: "${paddedDigits}" (Confidence score: ${allCandidates[0].score.toFixed(1)})`);
+        this.logger.log(`OCR Successful! Selected reading: "${paddedDigits}" (Score: ${allCandidates[0].score.toFixed(1)}) | Total time: ${Date.now() - startTime}ms`);
 
         return {
           success: true,
@@ -89,7 +111,7 @@ export class MeterReadingsService {
         };
       }
 
-      this.logger.warn('OCR Analysis finished, but no valid water meter reading candidates were found.');
+      this.logger.warn(`OCR finished with no valid candidates. Total time: ${Date.now() - startTime}ms`);
       return {
         success: false,
         read_unit: null,
