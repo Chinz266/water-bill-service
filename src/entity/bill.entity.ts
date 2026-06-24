@@ -36,8 +36,8 @@ export class BillEntity {
   @Column({ length: 1000, nullable: true })
   pdf_path!: string; // Path สำหรับเก็บไฟล์ PDF บิลค่าน้ำ
 
-  @Column()
-  create_by!: number;
+  @Column({ nullable: true })
+  create_by?: number;
 
   @CreateDateColumn()
   create_date!: Date;
