@@ -31,7 +31,7 @@ import { BillsController } from './controller/bills.controller';
       password: '',  // ใส่ password ของ MySQL
       database: 'water-bill-db',     // ใส่ชื่อฐานข้อมูลที่คุณสร้างไว้
       entities: [__dirname + '/**/*.entity{.ts,.js}'],
-      synchronize: true,     // แนะนำให้เปิด true แค่ตอน Dev (มันจะสร้างตารางให้ตาม Entity อัตโนมัติ)
+      synchronize: false,     // แนะนำให้เปิด true แค่ตอน Dev (มันจะสร้างตารางให้ตาม Entity อัตโนมัติ)
     }),
     TypeOrmModule.forFeature([AdminEntity, MemberEntity, WaterRateEntity, VillageEntity, MeterReadingEntity, BillEntity ])
   ],
