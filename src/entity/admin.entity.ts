@@ -11,6 +11,9 @@ export class AdminEntity {
   @Column({ type: 'varchar', length: 45, nullable: true })
   lname!: string;
 
+  @Column({ type: 'varchar', length: 100, unique: true })
+  email!: string;
+
   @Column({ type: 'varchar', length: 20, nullable: true })
   phone!: string;
 

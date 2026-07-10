@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
+import { HttpModule } from '@nestjs/axios';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AdminController } from './controller/admin.controller';
@@ -20,9 +22,13 @@ import { MeterReadingsService } from './service/meter-readings.service';
 import { BillEntity } from './entity/bill.entity';
 import { BillsService } from './service/bills.service';
 import { BillsController } from './controller/bills.controller';
+import { AuthController } from './controller/auth.controller';
+import { AuthService } from './service/auth.service';
 
 @Module({
   imports: [
+    ConfigModule.forRoot({ isGlobal: true }),
+    HttpModule,
     TypeOrmModule.forRoot({
       type: 'mysql',
       host: 'localhost',
@@ -35,7 +41,7 @@ import { BillsController } from './controller/bills.controller';
     }),
     TypeOrmModule.forFeature([AdminEntity, MemberEntity, WaterRateEntity, VillageEntity, MeterReadingEntity, BillEntity ])
   ],
-  controllers: [AppController, AdminController, MemberController, WaterRatesController, VillagesController, MeterReadingsController, BillsController],
-  providers: [AppService, AdminService, MemberService, WaterRatesService, VillagesService, MeterReadingsService, BillsService],
+  controllers: [AppController, AdminController, MemberController, WaterRatesController, VillagesController, MeterReadingsController, BillsController, AuthController],
+  providers: [AppService, AdminService, MemberService, WaterRatesService, VillagesService, MeterReadingsService, BillsService, AuthService],
 })
 export class AppModule {}
