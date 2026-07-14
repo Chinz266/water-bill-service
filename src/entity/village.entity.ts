@@ -35,7 +35,8 @@ export class VillageEntity {
   @Column()
   create_by!: number;
 
-  @CreateDateColumn()
+  // 🌟 ชื่อคอลัมน์จริงใน DB สะกดว่า craeta_date
+  @CreateDateColumn({ name: 'craeta_date' })
   create_date!: Date;
 
   @Column({ nullable: true })

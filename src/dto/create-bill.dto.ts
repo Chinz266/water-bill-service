@@ -25,13 +25,13 @@ export class CreateBillDto {
   @ApiProperty({ description: 'บิลประจำปี (เช่น 2026)', example: '2026' })
   billing_year!: string;
 
-  @ApiPropertyOptional({ 
-    description: 'สถานะการจ่ายเงิน', 
-    enum: ['PENDING', 'PAID', 'OVERDUE'], 
-    default: 'PENDING',
-    example: 'PENDING'
+  @ApiPropertyOptional({
+    description: 'สถานะการจ่ายเงิน',
+    enum: ['Pending', 'Paid', 'Overdue'],
+    default: 'Pending',
+    example: 'Pending'
   })
-  payment_status?: 'PENDING' | 'PAID' | 'OVERDUE';
+  payment_status?: 'Pending' | 'Paid' | 'Overdue';
 
   @ApiPropertyOptional({ description: 'ID ของ Admin ผู้สร้างบิล', example: 1 })
   create_by?: number;

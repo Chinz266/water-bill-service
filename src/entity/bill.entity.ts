@@ -30,8 +30,9 @@ export class BillEntity {
   billing_year!: string; // ประจำปี (เช่น '2026')
 
   // สมมติสถานะการจ่ายเงินมี 3 แบบ: รอจ่าย, จ่ายแล้ว, ค้างชำระ
-  @Column({ type: 'enum', enum: ['PENDING', 'PAID', 'OVERDUE'], default: 'PENDING' })
-  payment_status!: 'PENDING' | 'PAID' | 'OVERDUE';
+  // 🌟 ตัวพิมพ์ต้องตรงกับ enum ใน Database: ('Pending','Paid','Overdue')
+  @Column({ type: 'enum', enum: ['Pending', 'Paid', 'Overdue'], default: 'Pending' })
+  payment_status!: 'Pending' | 'Paid' | 'Overdue';
 
   @Column({ length: 1000, nullable: true })
   pdf_path!: string; // Path สำหรับเก็บไฟล์ PDF บิลค่าน้ำ

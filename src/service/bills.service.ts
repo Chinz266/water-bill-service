@@ -40,6 +40,9 @@ export class BillsService {
       ...createBillDto,
       usage_unit: usage_unit,     // เขียนทับด้วยค่าที่คำนวณได้
       total_amount: total_amount, // เขียนทับด้วยยอดเงินที่ถูกต้อง
+      // 🌟 กำหนดค่าเองให้ชัดเจน กัน payment_status = NULL และ create_date = 0000-00-00
+      payment_status: createBillDto.payment_status ?? 'Pending',
+      create_date: new Date(),
     });
 
     // 5. บันทึกลง Database

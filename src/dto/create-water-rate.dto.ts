@@ -9,11 +9,11 @@ export class CreateWaterRateDto {
 
   @ApiProperty({
     description: 'สถานะการเปิดใช้งานเรทค่าน้ำ',
-    enum: ['ACTIVE', 'INACTIVE'],
-    default: 'ACTIVE',
-    example: 'ACTIVE'
+    enum: ['Active', 'Inactive'],
+    default: 'Active',
+    example: 'Active'
   })
-  status!: 'ACTIVE' | 'INACTIVE';
+  status!: 'Active' | 'Inactive';
 
   @ApiProperty({
     description: 'ID ของ Admin ผู้ที่สร้างเรทค่าน้ำนี้',

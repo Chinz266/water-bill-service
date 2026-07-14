@@ -9,8 +9,9 @@ export class WaterRateEntity {
   @Column('decimal', { precision: 10, scale: 2 }) 
   price_per_unit!: number;
 
-  @Column({ type: 'enum', enum: ['ACTIVE', 'INACTIVE'], default: 'ACTIVE' })
-  status!: 'ACTIVE' | 'INACTIVE';
+  // 🌟 ตัวพิมพ์ต้องตรงกับ enum ใน Database: ('Active','Inactive')
+  @Column({ type: 'enum', enum: ['Active', 'Inactive'], default: 'Active' })
+  status!: 'Active' | 'Inactive';
 
   @Column()
   create_by!: number;

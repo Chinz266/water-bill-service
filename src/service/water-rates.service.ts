@@ -22,7 +22,7 @@ export class WaterRatesService {
   async findActive() {
     // ใช้คำสั่งหาเรทที่ status เป็น ACTIVE
     return await this.waterRateRepository.findOne({
-      where: { status: 'ACTIVE' },
+      where: { status: 'Active' },
       order: { create_date: 'DESC' } // เผื่อเหนียว ดึงตัวที่สร้างล่าสุดมา
     });
   }
