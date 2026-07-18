@@ -1,4 +1,4 @@
-import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import { Entity, Column, PrimaryGeneratedColumn } from 'typeorm';
 
 @Entity('meter_readings')
 export class MeterReadingEntity {
@@ -22,12 +22,15 @@ export class MeterReadingEntity {
   create_by?: number;
 
   // 🌟 ชื่อคอลัมน์จริงใน DB สะกดว่า creat_date (ไม่มี e)
-  @CreateDateColumn({ name: 'creat_date' })
+  // ⚠️ ห้ามใช้ @CreateDateColumn เพราะ TypeORM จะส่ง DEFAULT ลง INSERT โดยหวังว่า DB มี
+  // DEFAULT CURRENT_TIMESTAMP แต่คอลัมน์จริงเป็น `date NOT NULL` ที่ไม่มี default
+  // → MySQL จะเขียน '0000-00-00' ให้แทน จึงต้องให้ service เซ็ตค่าเอง (เหมือน water_rates)
+  @Column({ name: 'creat_date', type: 'date' })
   create_date!: Date;
 
   @Column({ nullable: true })
   modify_by!: number;
 
-  @UpdateDateColumn()
-  modify_date!: Date;
+  @Column({ type: 'date', nullable: true })
+  modify_date!: Date | null;
 }

@@ -36,6 +36,7 @@ import { AuthService } from './service/auth.service';
       username: 'root',      // ใส่ username ของ MySQL
       password: '',  // ใส่ password ของ MySQL
       database: 'water-bill-db',     // ใส่ชื่อฐานข้อมูลที่คุณสร้างไว้
+      charset: 'utf8mb4',     // 🌟 บังคับ connection เป็น utf8mb4 ไม่งั้นภาษาไทยจะเก็บเป็น ????? (เพี้ยน)
       entities: [__dirname + '/**/*.entity{.ts,.js}'],
       synchronize: false,     // แนะนำให้เปิด true แค่ตอน Dev (มันจะสร้างตารางให้ตาม Entity อัตโนมัติ)
     }),

@@ -3,6 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { BillEntity } from 'src/entity/bill.entity';
 import { WaterRateEntity } from '../entity/water-rate.entity'; // ปรับ Path ให้ตรงกับโฟลเดอร์ของคุณ
+import { MeterReadingEntity } from '../entity/meter-reading.entity';
+import { MemberEntity } from '../entity/member.entity';
 import { CreateBillDto } from 'src/dto/create-bill.dto';
 
 @Injectable()
@@ -32,8 +34,9 @@ export class BillsService {
     }
 
     // 3. คำนวณหาหน่วยที่ใช้ไป และยอดเงินรวม
+    // price_per_unit เป็น decimal ใน MySQL ซึ่ง TypeORM คืนมาเป็น string ('15.00') ต้องแปลงก่อนคูณ
     const usage_unit = createBillDto.current_unit - createBillDto.previous_unit;
-    const total_amount = usage_unit * 10
+    const total_amount = usage_unit * Number(rate.price_per_unit)
 
     // 4. นำข้อมูลมาผูกรวมกัน โดยบังคับใช้ยอดที่เราคำนวณเอง
     const newBill = this.billRepository.create({
@@ -49,20 +52,71 @@ export class BillsService {
     return await this.billRepository.save(newBill);
   }
 
-  // ดูบิลทั้งหมด
-  async findAll() {
-    return await this.billRepository.find({
-      order: { create_date: 'DESC' },
-    });
+  // 🌟 ตาราง bills เก็บแค่ meter_readings_id หน้าเว็บเลยไม่รู้ว่าบิลนี้เป็นของบ้านหลังไหน
+  //    ต้อง join ผ่าน meter_readings ไปหา members (และดึงเรทค่าน้ำมาโชว์ในหน้ารายละเอียดด้วย)
+  private billDetailQuery() {
+    return this.billRepository
+      .createQueryBuilder('bill')
+      .leftJoin(MeterReadingEntity, 'reading', 'reading.id = bill.meter_readings_id')
+      .leftJoin(MemberEntity, 'member', 'member.id = reading.members_id')
+      .leftJoin(WaterRateEntity, 'rate', 'rate.id = bill.water_rates_id')
+      .addSelect([
+        'reading.id',
+        'reading.reading_date',
+        'reading.meter_unit',
+        'member.id',
+        'member.house_no',
+        'member.fname',
+        'member.lname',
+        'member.phone',
+        'rate.price_per_unit',
+      ]);
   }
 
-  // ดูบิลตาม ID
+  // รวมข้อมูลบิล + ลูกบ้าน + เรทค่าน้ำ ให้เป็นก้อนเดียวที่หน้าเว็บใช้ได้เลย
+  private toDetail(bill: BillEntity, row: Record<string, any>) {
+    return {
+      ...bill,
+      // decimal ของ MySQL กลับมาเป็น string ต้องแปลงก่อนส่งให้หน้าเว็บ
+      price_per_unit: row?.rate_price_per_unit != null ? Number(row.rate_price_per_unit) : null,
+      meter_reading: row?.reading_id
+        ? {
+            id: row.reading_id,
+            reading_date: row.reading_reading_date,
+            meter_unit: row.reading_meter_unit,
+          }
+        : null,
+      member: row?.member_id
+        ? {
+            id: row.member_id,
+            house_no: row.member_house_no,
+            fname: row.member_fname,
+            lname: row.member_lname,
+            phone: row.member_phone,
+          }
+        : null,
+    };
+  }
+
+  // ดูบิลทั้งหมด (พร้อมข้อมูลลูกบ้านเจ้าของบิล)
+  async findAll() {
+    const { entities, raw } = await this.billDetailQuery()
+      .orderBy('bill.create_date', 'DESC')
+      .getRawAndEntities();
+
+    return entities.map((bill, index) => this.toDetail(bill, raw[index]));
+  }
+
+  // ดูบิลตาม ID (พร้อมข้อมูลลูกบ้านเจ้าของบิล)
   async findOne(id: number) {
-    const bill = await this.billRepository.findOne({ where: { id } });
-    if (!bill) {
+    const { entities, raw } = await this.billDetailQuery()
+      .where('bill.id = :id', { id })
+      .getRawAndEntities();
+
+    if (!entities.length) {
       throw new NotFoundException(`ไม่พบบิลหมายเลข ${id}`);
     }
-    return bill;
+    return this.toDetail(entities[0], raw[0]);
   }
 
   async updateStatus(id: number, payment_status: string) {

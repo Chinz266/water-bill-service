@@ -76,22 +76,32 @@ async function main(): Promise<void> {
     const existing = await repository.findOneBy({ email });
     if (existing) {
         console.log(`ℹ️  มีแอดมิน ${email} อยู่แล้ว (id: ${existing.id}) ข้ามการสร้าง`);
+        if (existing.id !== 1) {
+            console.log(`⚠️  หน้าบ้านยัง hardcode create_by = 1 อยู่ แต่แอดมินตัวนี้ id = ${existing.id}`);
+        }
         return;
     }
 
     // ⚠️ รหัสผ่านยังเก็บแบบ plaintext ให้ตรงกับ AuthService (รอติดตั้ง bcrypt ในขั้นถัดไป)
-    const admin = await repository.save(
-        repository.create({
-            fname,
-            lname,
-            email,
-            password,
-            role: 'admin',
-            createDate: new Date(),
-        }),
-    );
+    const admin = repository.create({
+        fname,
+        lname,
+        email,
+        password,
+        role: 'admin',
+        createDate: new Date(),
+    });
 
-    console.log(`✅ สร้างแอดมินเริ่มต้นสำเร็จ (id: ${admin.id})`);
+    // ตารางอื่น (water_rates, villages, members, meter_readings) อ้าง create_by = 1 แบบ hardcode
+    // เพราะยังไม่มีระบบ login ที่ส่ง id ของแอดมินที่ล็อกอินอยู่จริงมาให้
+    // ถ้าตารางว่าง จึงตรึง id = 1 ไว้ ไม่ปล่อยให้ auto-increment แจกเลขอื่น
+    if ((await repository.count()) === 0) {
+        admin.id = 1;
+    }
+
+    const saved = await repository.save(admin);
+
+    console.log(`✅ สร้างแอดมินเริ่มต้นสำเร็จ (id: ${saved.id})`);
     console.log(`   อีเมล: ${email}`);
     console.log(`   รหัสผ่าน: ${password}`);
 }

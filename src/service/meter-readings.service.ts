@@ -6,6 +6,8 @@ import { ConfigService } from '@nestjs/config'
 import { firstValueFrom } from 'rxjs'
 import FormData from 'form-data'
 import { MeterReadingEntity } from '../entity/meter-reading.entity' // เช็ค Path ให้ตรงกับโครงสร้างโฟลเดอร์ของคุณนะครับ
+import { AdminEntity } from '../entity/admin.entity'
+import { MemberEntity } from '../entity/member.entity'
 import { CreateMeterReadingDto } from '../dto/create-meter-reading.dto'
 
 @Injectable()
@@ -16,6 +18,10 @@ export class MeterReadingsService {
   constructor(
     @InjectRepository(MeterReadingEntity)
     private readonly meterReadingRepository: Repository<MeterReadingEntity>,
+    @InjectRepository(AdminEntity)
+    private readonly adminRepository: Repository<AdminEntity>,
+    @InjectRepository(MemberEntity)
+    private readonly memberRepository: Repository<MemberEntity>,
     private readonly httpService: HttpService,
     private readonly configService: ConfigService,
   ) {
@@ -30,9 +36,29 @@ export class MeterReadingsService {
   // --- ส่วนฟังก์ชัน CRUD ปกติ ---
   // ==========================================
   async create(createMeterReadingDto: CreateMeterReadingDto) {
-    const newReading = this.meterReadingRepository.create(
-      createMeterReadingDto,
-    )
+    // meter_readings.create_by / members_id1 ติด Foreign Key กับ admin.id และ members.id
+    // ถ้าไม่เช็คก่อน MySQL จะโยน ER_NO_REFERENCED_ROW_2 ออกมาเป็น 500 ที่อ่านไม่รู้เรื่อง
+    const { create_by, members_id } = createMeterReadingDto
+
+    if (create_by !== undefined && create_by !== null) {
+      const admin = await this.adminRepository.findOneBy({ id: create_by })
+      if (!admin) {
+        throw new BadRequestException(
+          `ไม่พบผู้ดูแลระบบรหัส ${create_by} กรุณาออกจากระบบแล้วเข้าสู่ระบบใหม่อีกครั้ง`,
+        )
+      }
+    }
+
+    const member = await this.memberRepository.findOneBy({ id: members_id })
+    if (!member) {
+      throw new BadRequestException(`ไม่พบข้อมูลลูกบ้านรหัส ${members_id}`)
+    }
+
+    const newReading = this.meterReadingRepository.create({
+      ...createMeterReadingDto,
+      // create_date ต้องเซ็ตเอง ดูหมายเหตุใน MeterReadingEntity
+      create_date: new Date(),
+    })
     return await this.meterReadingRepository.save(newReading)
   }
 
@@ -93,6 +119,8 @@ export class MeterReadingsService {
         return {
           success: true,
           read_unit: data.full_reading,
+          // ส่ง confidence ต่อให้หน้าเว็บด้วย เอาไว้ทำแถบบอกว่าอ่านได้ชัดแค่ไหน
+          confidence: data.confidence,
           message: 'สกัดค่าตัวเลขสำเร็จ',
         }
       }
