@@ -1,9 +1,15 @@
 import 'reflect-metadata';
 import { config as loadEnv } from 'dotenv';
 import { DataSource, QueryRunner } from 'typeorm';
+import * as bcrypt from 'bcryptjs';
 import { AdminEntity } from '../entity/admin.entity';
 
 loadEnv();
+
+const SALT_ROUNDS = 10;
+
+/** bcrypt hash ขึ้นต้นด้วย $2a$ / $2b$ / $2y$ เสมอ ใช้เช็คว่ารหัสถูก hash แล้วหรือยัง */
+const isHashed = (value: string): boolean => /^\$2[aby]\$/.test(value);
 
 // ค่า default ตรงกับบัญชีทดสอบที่ระบุไว้ใน README
 const email = process.env.SEED_ADMIN_EMAIL ?? 'somying@example.com';
@@ -55,6 +61,19 @@ async function ensureAdminSchema(runner: QueryRunner): Promise<void> {
         await runner.query('ALTER TABLE `admin` ADD COLUMN `modify_date` datetime DEFAULT NULL');
     }
 
+    // 🌟 bcrypt hash ยาว 60 ตัว แต่ schema เดิมเป็น varchar(45)
+    //    ถ้าไม่ขยายก่อน MySQL จะตัด hash ทิ้งเงียบ ๆ แล้วล็อกอินไม่ผ่านตลอดกาล
+    const passwordColumn: { Type: string }[] = await runner.query(
+        "SHOW COLUMNS FROM `admin` WHERE Field = 'password'",
+    );
+    if (passwordColumn[0] && /varchar\((\d+)\)/i.test(passwordColumn[0].Type)) {
+        const width = Number(RegExp.$1);
+        if (width < 255) {
+            console.log(`🔧 ขยาย admin.password จาก varchar(${width}) เป็น varchar(255) ให้พอกับ bcrypt hash`);
+            await runner.query('ALTER TABLE `admin` MODIFY COLUMN `password` varchar(255) NULL');
+        }
+    }
+
     const indexes: { Key_name: string }[] = await runner.query('SHOW INDEX FROM `admin`');
     if (!indexes.some((index) => index.Key_name === 'IDX_admin_email')) {
         console.log('🔧 เพิ่ม unique key บน admin.email');
@@ -73,6 +92,18 @@ async function main(): Promise<void> {
     }
 
     const repository = dataSource.getRepository(AdminEntity);
+
+    // 🌟 แปลงรหัสผ่าน plaintext ที่ค้างอยู่จากยุคก่อนใช้ bcrypt ให้เป็น hash
+    //    ทำกับทุกบัญชี ไม่ใช่แค่บัญชี seed เพราะบัญชีที่สมัครไว้ก่อนหน้าก็เป็น plaintext เหมือนกัน
+    const allAdmins = await repository.find();
+    for (const account of allAdmins) {
+        if (account.password && !isHashed(account.password)) {
+            account.password = await bcrypt.hash(account.password, SALT_ROUNDS);
+            await repository.save(account);
+            console.log(`🔐 แปลงรหัสผ่านของ ${account.email} เป็น bcrypt แล้ว`);
+        }
+    }
+
     const existing = await repository.findOneBy({ email });
     if (existing) {
         console.log(`ℹ️  มีแอดมิน ${email} อยู่แล้ว (id: ${existing.id}) ข้ามการสร้าง`);
@@ -82,12 +113,12 @@ async function main(): Promise<void> {
         return;
     }
 
-    // ⚠️ รหัสผ่านยังเก็บแบบ plaintext ให้ตรงกับ AuthService (รอติดตั้ง bcrypt ในขั้นถัดไป)
     const admin = repository.create({
         fname,
         lname,
         email,
-        password,
+        // เก็บเฉพาะ hash ไม่เก็บรหัสจริง
+        password: await bcrypt.hash(password, SALT_ROUNDS),
         role: 'admin',
         createDate: new Date(),
     });

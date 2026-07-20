@@ -1,10 +1,16 @@
 import { Controller, Get, Post, Body, Param, Patch, Delete } from '@nestjs/common';
-import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { BillsService } from 'src/service/bills.service';
 import { CreateBillDto } from 'src/dto/create-bill.dto';
 import { BillEntity } from '../entity/bill.entity';
+import { Roles } from 'src/auth/roles.decorator';
+
 
 @ApiTags('Bills (บิลเรียกเก็บค่าน้ำ)')
+// 🔐 ทั้ง controller นี้เป็นงานฝั่งผู้ดูแลหมู่บ้าน — ต้องล็อกอินเป็น admin เท่านั้น
+//    เมื่อเปิดระบบล็อกอินลูกบ้านแล้ว ค่อยแยก route ที่ลูกบ้านดูได้ออกมาทีหลัง
+@Roles('admin')
+@ApiBearerAuth()
 @Controller('bills')
 export class BillsController {
   constructor(private readonly billsService: BillsService) {}

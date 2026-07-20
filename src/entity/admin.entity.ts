@@ -17,7 +17,8 @@ export class AdminEntity {
   @Column({ type: 'varchar', length: 20, nullable: true })
   phone!: string;
 
-  @Column({ type: 'varchar', length: 45, nullable: true })
+  // 🌟 ต้องยาว 255 เพราะเก็บ bcrypt hash (60 ตัว) ถ้าเหลือ 45 hash จะถูกตัดแล้วล็อกอินไม่ได้ตลอดกาล
+  @Column({ type: 'varchar', length: 255, nullable: true })
   password!: string;
 
   @Column({ type: 'varchar', length: 45, nullable: true })

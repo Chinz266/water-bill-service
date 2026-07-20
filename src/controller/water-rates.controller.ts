@@ -1,7 +1,13 @@
 import { Controller, Get, Post, Body } from '@nestjs/common';
 import { CreateWaterRateDto } from 'src/dto/create-water-rate.dto';
 import { WaterRatesService } from 'src/service/water-rates.service';
+import { Roles } from 'src/auth/roles.decorator';
+import { ApiBearerAuth } from '@nestjs/swagger';
 
+// 🔐 ทั้ง controller นี้เป็นงานฝั่งผู้ดูแลหมู่บ้าน — ต้องล็อกอินเป็น admin เท่านั้น
+//    เมื่อเปิดระบบล็อกอินลูกบ้านแล้ว ค่อยแยก route ที่ลูกบ้านดูได้ออกมาทีหลัง
+@Roles('admin')
+@ApiBearerAuth()
 @Controller('water-rates')
 export class WaterRatesController {
   constructor(private readonly waterRatesService: WaterRatesService) {}
