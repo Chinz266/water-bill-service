@@ -24,4 +24,10 @@ export class WaterRatesController {
   async findActive() {
     return await this.waterRatesService.findActive();
   }
+
+  // ประวัติเรทค่าน้ำทั้งหมด — ใช้ในหน้าตั้งค่าเรทค่าน้ำ
+  @Get()
+  async findAll() {
+    return await this.waterRatesService.findAll();
+  }
 }

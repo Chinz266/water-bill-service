@@ -140,8 +140,25 @@ export class BillsService {
   }
 
   async remove(id: number) {
-    // สั่งลบข้อมูลตาม ID จากตาราง
-    await this.billRepository.delete(id);
+    const bill = await this.billRepository.findOne({ where: { id } });
+    if (!bill) {
+      throw new NotFoundException(`ไม่พบบิลหมายเลข ${id}`);
+    }
+
+    // 🌟 บิลเกิดจากการจดมิเตอร์ 1 ครั้ง — ถ้าลบบิลแต่ทิ้งการจดไว้
+    //    เลขมิเตอร์ "ครั้งก่อน" ของบ้านนั้นจะยังอ้างเลขที่ถูกยกเลิกไปแล้ว ทำให้บิลใบถัดไปคำนวณเพี้ยน
+    //    จึงลบเป็นชุดเดียวกันใน transaction (เช็คก่อนว่าไม่มีบิลใบอื่นใช้การจดครั้งเดียวกันอยู่)
+    await this.billRepository.manager.transaction(async (manager) => {
+      await manager.delete(BillEntity, id);
+
+      const otherBills = await manager.count(BillEntity, {
+        where: { meter_readings_id: bill.meter_readings_id },
+      });
+      if (otherBills === 0) {
+        await manager.delete(MeterReadingEntity, bill.meter_readings_id);
+      }
+    });
+
     return { message: `ลบบิล ID ${id} สำเร็จเรียบร้อย!` };
   }
 }

@@ -2,6 +2,7 @@ import { Injectable, UnprocessableEntityException } from '@nestjs/common';
 import { MemberEntity } from 'src/entity/member.entity';
 import { MeterReadingEntity } from 'src/entity/meter-reading.entity';
 import { BillEntity } from 'src/entity/bill.entity';
+import { AccountMemberEntity } from 'src/entity/account-member.entity';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { MemberRemoveDto } from 'src/dto/member-remove.dto';
@@ -106,7 +107,9 @@ export class MemberService {
                 // 2. แล้วลบการจดมิเตอร์
                 await manager.delete(MeterReadingEntity, readingIds);
             }
-            // 3. สุดท้ายลบตัวบ้าน
+            // 3. ตัดลิงก์บัญชีลูกบ้านที่ผูกกับบ้านนี้ (ถ้ามี) ไม่งั้นจะเหลือลิงก์ขยะชี้ไปบ้านที่หายไปแล้ว
+            await manager.delete(AccountMemberEntity, { members_id: userData.id });
+            // 4. สุดท้ายลบตัวบ้าน
             await manager.delete(MemberEntity, userData.id);
         });
     }
