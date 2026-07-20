@@ -107,6 +107,19 @@ export class BillsService {
     return entities.map((bill, index) => this.toDetail(bill, raw[index]));
   }
 
+  // ดูบิลของ "บ้านที่ระบุ" เท่านั้น — ใช้โดยพอร์ทัลลูกบ้าน (เห็นเฉพาะบ้านตัวเอง)
+  //    memberIds มาจากตาราง account_members ของบัญชีที่ล็อกอินอยู่ ไม่ใช่จากผู้ใช้ส่งมาเอง
+  async findAllForMembers(memberIds: number[]) {
+    if (memberIds.length === 0) return [];
+
+    const { entities, raw } = await this.billDetailQuery()
+      .where('member.id IN (:...memberIds)', { memberIds })
+      .orderBy('bill.create_date', 'DESC')
+      .getRawAndEntities();
+
+    return entities.map((bill, index) => this.toDetail(bill, raw[index]));
+  }
+
   // ดูบิลตาม ID (พร้อมข้อมูลลูกบ้านเจ้าของบิล)
   async findOne(id: number) {
     const { entities, raw } = await this.billDetailQuery()

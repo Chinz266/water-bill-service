@@ -12,6 +12,7 @@ import { AdminService } from './service/admin.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AdminEntity } from './entity/admin.entity';
 import { MemberEntity } from './entity/member.entity';
+import { AccountMemberEntity } from './entity/account-member.entity';
 import { MemberController } from './controller/member.controller';
 import { MemberService } from './service/member.service';
 import { WaterRatesController } from './controller/water-rates.controller';
@@ -28,6 +29,8 @@ import { BillsService } from './service/bills.service';
 import { BillsController } from './controller/bills.controller';
 import { AuthController } from './controller/auth.controller';
 import { AuthService } from './service/auth.service';
+import { MemberPortalController } from './controller/member-portal.controller';
+import { MemberPortalService } from './service/member-portal.service';
 
 @Module({
   imports: [
@@ -64,11 +67,11 @@ import { AuthService } from './service/auth.service';
         };
       },
     }),
-    TypeOrmModule.forFeature([AdminEntity, MemberEntity, WaterRateEntity, VillageEntity, MeterReadingEntity, BillEntity ])
+    TypeOrmModule.forFeature([AdminEntity, MemberEntity, AccountMemberEntity, WaterRateEntity, VillageEntity, MeterReadingEntity, BillEntity ])
   ],
-  controllers: [AppController, AdminController, MemberController, WaterRatesController, VillagesController, MeterReadingsController, BillsController, AuthController],
+  controllers: [AppController, AdminController, MemberController, WaterRatesController, VillagesController, MeterReadingsController, BillsController, AuthController, MemberPortalController],
   providers: [
-    AppService, AdminService, MemberService, WaterRatesService, VillagesService, MeterReadingsService, BillsService, AuthService,
+    AppService, AdminService, MemberService, WaterRatesService, VillagesService, MeterReadingsService, BillsService, AuthService, MemberPortalService,
     // 🔐 ตั้ง guard เป็น global = ทุก endpoint ปิดไว้ก่อนเป็นค่าเริ่มต้น
     //    route ไหนที่ตั้งใจเปิดสาธารณะต้องแปะ @Public() เอง
     //    ปลอดภัยกว่าไล่แปะ guard ทีละ route เพราะ "ลืมแปะ = ปิด" ไม่ใช่ "ลืมแปะ = เปิดทิ้ง"

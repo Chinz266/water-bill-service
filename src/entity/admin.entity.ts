@@ -11,11 +11,14 @@ export class AdminEntity {
   @Column({ type: 'varchar', length: 45, nullable: true })
   lname!: string;
 
-  @Column({ type: 'varchar', length: 100, unique: true })
-  email!: string;
+  // 🌟 nullable เพราะบัญชีลูกบ้าน (role='member') ไม่มีอีเมล ล็อกอินด้วยเบอร์แทน
+  @Column({ type: 'varchar', length: 100, unique: true, nullable: true })
+  email!: string | null;
 
-  @Column({ type: 'varchar', length: 20, nullable: true })
-  phone!: string;
+  // 🌟 unique เพราะเป็น "username" ของบัญชีลูกบ้าน (คนละเรื่องกับ members.phone
+  //    ที่เป็นเบอร์ติดต่อของบ้าน ซึ่งซ้ำกันได้ระหว่างบ้าน)
+  @Column({ type: 'varchar', length: 20, nullable: true, unique: true })
+  phone!: string | null;
 
   // 🌟 ต้องยาว 255 เพราะเก็บ bcrypt hash (60 ตัว) ถ้าเหลือ 45 hash จะถูกตัดแล้วล็อกอินไม่ได้ตลอดกาล
   @Column({ type: 'varchar', length: 255, nullable: true })

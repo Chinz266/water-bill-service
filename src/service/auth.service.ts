@@ -4,8 +4,11 @@ import { JwtService } from '@nestjs/jwt';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcryptjs';
 import { AdminEntity } from 'src/entity/admin.entity';
+import { MemberEntity } from 'src/entity/member.entity';
+import { AccountMemberEntity } from 'src/entity/account-member.entity';
 import { AuthRegisterDto } from 'src/dto/auth-register.dto';
 import { AuthLoginDto } from 'src/dto/auth-login.dto';
+import { MemberAuthDto } from 'src/dto/member-auth.dto';
 import { JwtPayload, UserRole } from 'src/auth/auth.constants';
 
 /** จำนวนรอบการ hash — 10 เป็นค่ามาตรฐานที่สมดุลระหว่างความปลอดภัยกับความเร็ว */
@@ -25,6 +28,10 @@ export class AuthService {
     constructor(
         @InjectRepository(AdminEntity)
         private adminRepository: Repository<AdminEntity>,
+        @InjectRepository(MemberEntity)
+        private memberRepository: Repository<MemberEntity>,
+        @InjectRepository(AccountMemberEntity)
+        private accountMemberRepository: Repository<AccountMemberEntity>,
         private readonly jwtService: JwtService,
     ) { }
 
@@ -99,5 +106,65 @@ export class AuthService {
     // เข้าสู่ระบบด้วย Google (รอเชื่อม Google Client ID + google-auth-library ในขั้นถัดไป)
     async loginWithGoogle(): Promise<never> {
         throw new UnprocessableEntityException('ระบบเข้าสู่ระบบด้วย Google ยังไม่เปิดใช้งาน');
+    }
+
+    // สมัครสมาชิกลูกบ้าน — ล็อกอินด้วยเบอร์โทร ไม่ใช่อีเมล
+    async registerMember(data: MemberAuthDto): Promise<AuthResult> {
+        if (!data.phone || !data.password) {
+            throw new UnprocessableEntityException('กรุณากรอกเบอร์โทรและรหัสผ่าน');
+        }
+        const phone = data.phone.trim();
+
+        const existing = await this.adminRepository.findOneBy({ phone });
+        if (existing) {
+            throw new UnprocessableEntityException(`เบอร์โทร ${phone} มีบัญชีอยู่แล้ว กรุณาเข้าสู่ระบบแทน`);
+        }
+
+        // 🌟 ต้องมีบ้านที่ลงทะเบียนเบอร์นี้ไว้ในระบบก่อน ไม่งั้นใครก็สมัครมั่ว ๆ ได้
+        //    โดยไม่มีบ้านจริงผูกอยู่ (เห็นข้อมูลของใครไม่ได้เลย)
+        const linkedHouses = await this.memberRepository.findBy({ phone });
+        if (linkedHouses.length === 0) {
+            throw new UnprocessableEntityException(
+                `ไม่พบบ้านที่ลงทะเบียนเบอร์ ${phone} ไว้ในระบบ กรุณาติดต่อผู้ดูแลหมู่บ้าน`,
+            );
+        }
+
+        const passwordHash = await bcrypt.hash(data.password, SALT_ROUNDS);
+        const account = this.adminRepository.create({
+            phone,
+            password: passwordHash,
+            role: 'member',
+            createDate: new Date(),
+        });
+        const saved = await this.adminRepository.save(account);
+
+        // ผูกบัญชีนี้เข้ากับ "ทุกบ้าน" ที่ใช้เบอร์เดียวกัน (เช่น 0822222222 → 99/1 และ 99/1/2)
+        const links = linkedHouses.map((house) =>
+            this.accountMemberRepository.create({ account_id: saved.id, members_id: house.id }),
+        );
+        await this.accountMemberRepository.save(links);
+
+        return this.issueToken(saved);
+    }
+
+    // เข้าสู่ระบบลูกบ้านด้วยเบอร์โทร
+    async loginMember(data: MemberAuthDto): Promise<AuthResult> {
+        if (!data.phone || !data.password) {
+            throw new UnauthorizedException('เบอร์โทรหรือรหัสผ่านไม่ถูกต้อง');
+        }
+
+        const account = await this.adminRepository.findOneBy({ phone: data.phone.trim(), role: 'member' });
+
+        // ข้อความเดียวกันทั้ง "ไม่มีเบอร์นี้" และ "รหัสผิด" กันคนร้ายไล่เดาเบอร์ที่มีจริง
+        if (!account || !account.password) {
+            throw new UnauthorizedException('เบอร์โทรหรือรหัสผ่านไม่ถูกต้อง');
+        }
+
+        const passwordMatched = await bcrypt.compare(data.password, account.password);
+        if (!passwordMatched) {
+            throw new UnauthorizedException('เบอร์โทรหรือรหัสผ่านไม่ถูกต้อง');
+        }
+
+        return this.issueToken(account);
     }
 }

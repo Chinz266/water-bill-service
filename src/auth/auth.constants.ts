@@ -13,6 +13,7 @@ export type UserRole = 'admin' | 'member';
 export interface JwtPayload {
     /** id ของบัญชี (มาตรฐาน JWT ใช้ชื่อ sub) */
     sub: number;
-    email: string;
+    // 🌟 nullable เพราะบัญชีลูกบ้าน (role='member') ล็อกอินด้วยเบอร์ ไม่มีอีเมล
+    email: string | null;
     role: UserRole;
 }

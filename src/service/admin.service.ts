@@ -29,7 +29,9 @@ export class AdminService {
         if (admin) {
             throw new UnprocessableEntityException(`แอดมิน: ${admin.fname} ${admin.lname} มีอยู่แล้ว`);
         }
-        const adminByPhone = await this.adminRepository.findOneBy({ phone: userData.phone });
+        // 🌟 phone ตอนนี้เป็น string | null (บัญชีลูกบ้านไม่มีอีเมลแต่ยังไงก็มีเบอร์)
+        //    findOneBy ไม่รับ null ตรง ๆ แปลงเป็น undefined ก่อน
+        const adminByPhone = await this.adminRepository.findOneBy({ phone: userData.phone ?? undefined });
         if (adminByPhone) {
             throw new UnprocessableEntityException(`เบอร์โทรศัพท์: ${adminByPhone.phone} มีอยู่แล้ว`);
         } else {
@@ -63,7 +65,7 @@ export class AdminService {
             throw new UnprocessableEntityException(`แอดมิน: ${adminByName.fname} ${adminByName.lname} มีอยู่แล้ว`);
         }
 
-        const adminByPhone = await this.adminRepository.findOneBy({ phone });
+        const adminByPhone = await this.adminRepository.findOneBy({ phone: phone ?? undefined });
         if (adminByPhone && adminByPhone.id !== admin.id) {
             throw new UnprocessableEntityException(`เบอร์โทรศัพท์: ${adminByPhone.phone} มีอยู่แล้ว`);
         }
