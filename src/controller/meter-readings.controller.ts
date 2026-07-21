@@ -1,11 +1,25 @@
-import { Controller, Get, Post, Body, Param, UseInterceptors, UploadedFile, BadRequestException } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  UseInterceptors,
+  UploadedFile,
+  BadRequestException,
+} from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { ApiTags, ApiOperation, ApiConsumes, ApiBody, ApiBearerAuth } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiConsumes,
+  ApiBody,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
 import { MeterReadingsService } from '../service/meter-readings.service';
 import 'multer';
 import { CreateMeterReadingDto } from '../dto/create-meter-reading.dto'; // เช็ค Path ให้ตรงด้วยนะครับ
 import { Roles } from 'src/auth/roles.decorator';
-
 
 @ApiTags('Meter Readings (การจดมิเตอร์น้ำ)')
 // 🔐 ทั้ง controller นี้เป็นงานฝั่งผู้ดูแลหมู่บ้าน — ต้องล็อกอินเป็น admin เท่านั้น
@@ -36,7 +50,9 @@ export class MeterReadingsController {
 
   // --- Endpoint สำหรับรับอัปโหลดรูปภาพ ---
   @Post('ocr-upload')
-  @ApiOperation({ summary: 'อัปโหลดรูปมิเตอร์เพื่อให้อ่านตัวเลขอัตโนมัติ (AI)' })
+  @ApiOperation({
+    summary: 'อัปโหลดรูปมิเตอร์เพื่อให้อ่านตัวเลขอัตโนมัติ (AI)',
+  })
   @ApiConsumes('multipart/form-data') // บอก Swagger ว่ารับข้อมูลแบบอัปโหลดไฟล์
   @ApiBody({
     schema: {

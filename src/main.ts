@@ -17,10 +17,11 @@ async function bootstrap() {
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
-  
+
   // กำหนด path สำหรับเข้าดู Swagger UI
   SwaggerModule.setup('api', app, document);
 
   await app.listen(3000);
 }
-bootstrap();
+// void = บอกชัดว่าตั้งใจไม่รอผลลัพธ์ (ไม่งั้น eslint เตือน floating promise)
+void bootstrap();

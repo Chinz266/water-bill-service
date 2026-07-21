@@ -1,4 +1,10 @@
-import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import {
+  Entity,
+  Column,
+  PrimaryGeneratedColumn,
+  CreateDateColumn,
+  UpdateDateColumn,
+} from 'typeorm';
 
 @Entity('bills')
 export class BillEntity {
@@ -31,7 +37,11 @@ export class BillEntity {
 
   // สมมติสถานะการจ่ายเงินมี 3 แบบ: รอจ่าย, จ่ายแล้ว, ค้างชำระ
   // 🌟 ตัวพิมพ์ต้องตรงกับ enum ใน Database: ('Pending','Paid','Overdue')
-  @Column({ type: 'enum', enum: ['Pending', 'Paid', 'Overdue'], default: 'Pending' })
+  @Column({
+    type: 'enum',
+    enum: ['Pending', 'Paid', 'Overdue'],
+    default: 'Pending',
+  })
   payment_status!: 'Pending' | 'Paid' | 'Overdue';
 
   @Column({ length: 1000, nullable: true })

@@ -1,57 +1,57 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateVillageDto {
-  @ApiProperty({ 
+  @ApiProperty({
     description: 'ID ของจังหวัด (อ้างอิงจากตาราง provinces)',
-    example: 1 
+    example: 1,
   })
   provinces_id!: number;
 
-  @ApiProperty({ 
+  @ApiProperty({
     description: 'ID ของอำเภอ (อ้างอิงจากตาราง districts)',
-    example: 5 
+    example: 5,
   })
   districts_id!: number;
 
-  @ApiProperty({ 
+  @ApiProperty({
     description: 'ID ของตำบล (อ้างอิงจากตาราง subdistricts)',
-    example: 12 
+    example: 12,
   })
   subdistricts_id!: number;
 
-  @ApiProperty({ 
+  @ApiProperty({
     description: 'ชื่อหมู่บ้าน',
-    example: 'หมู่บ้านจัดสรรอยู่สบาย' 
+    example: 'หมู่บ้านจัดสรรอยู่สบาย',
   })
   village_name!: string;
 
-  @ApiProperty({ 
+  @ApiProperty({
     description: 'หมู่ที่',
-    example: 'หมู่ 4' 
+    example: 'หมู่ 4',
   })
   village_no!: string;
 
-  @ApiPropertyOptional({ 
+  @ApiPropertyOptional({
     description: 'ชื่อผู้ใหญ่บ้าน',
-    example: 'นายสมชาย ใจดี' 
+    example: 'นายสมชาย ใจดี',
   })
   headman_name?: string;
 
-  @ApiPropertyOptional({ 
+  @ApiPropertyOptional({
     description: 'ชื่อผู้ช่วยผู้ใหญ่บ้าน',
-    example: 'นายสมปอง รักสงบ' 
+    example: 'นายสมปอง รักสงบ',
   })
   deputy_headman_name?: string;
 
-  @ApiPropertyOptional({ 
+  @ApiPropertyOptional({
     description: 'เบอร์โทรศัพท์ติดต่อ',
-    example: '0812345678' 
+    example: '0812345678',
   })
   phone?: string;
 
-  @ApiProperty({ 
+  @ApiProperty({
     description: 'ID ของ Admin ที่เป็นคนบันทึกข้อมูล',
-    example: 1 
+    example: 1,
   })
   create_by!: number;
 }

@@ -12,28 +12,49 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
  *      (ถ้ารับจาก body ผู้ใช้จะปลอมเป็น id คนอื่นได้)
  */
 export class UpdateVillageDto {
-  @ApiPropertyOptional({ description: 'ID ของจังหวัด (อ้างอิงตาราง provinces)', example: 1 })
+  @ApiPropertyOptional({
+    description: 'ID ของจังหวัด (อ้างอิงตาราง provinces)',
+    example: 1,
+  })
   provinces_id?: number;
 
-  @ApiPropertyOptional({ description: 'ID ของอำเภอ (อ้างอิงตาราง districts)', example: 5 })
+  @ApiPropertyOptional({
+    description: 'ID ของอำเภอ (อ้างอิงตาราง districts)',
+    example: 5,
+  })
   districts_id?: number;
 
-  @ApiPropertyOptional({ description: 'ID ของตำบล (อ้างอิงตาราง subdistricts)', example: 12 })
+  @ApiPropertyOptional({
+    description: 'ID ของตำบล (อ้างอิงตาราง subdistricts)',
+    example: 12,
+  })
   subdistricts_id?: number;
 
-  @ApiPropertyOptional({ description: 'ชื่อหมู่บ้าน', example: 'หมู่บ้านจัดสรรอยู่สบาย' })
+  @ApiPropertyOptional({
+    description: 'ชื่อหมู่บ้าน',
+    example: 'หมู่บ้านจัดสรรอยู่สบาย',
+  })
   village_name?: string;
 
   @ApiPropertyOptional({ description: 'หมู่ที่', example: 'หมู่ 4' })
   village_no?: string;
 
-  @ApiPropertyOptional({ description: 'ชื่อผู้ใหญ่บ้าน (ขึ้นบนใบเสร็จ)', example: 'นายสมชาย ใจดี' })
+  @ApiPropertyOptional({
+    description: 'ชื่อผู้ใหญ่บ้าน (ขึ้นบนใบเสร็จ)',
+    example: 'นายสมชาย ใจดี',
+  })
   headman_name?: string;
 
-  @ApiPropertyOptional({ description: 'ชื่อผู้ช่วยผู้ใหญ่บ้าน', example: 'นายสมปอง รักสงบ' })
+  @ApiPropertyOptional({
+    description: 'ชื่อผู้ช่วยผู้ใหญ่บ้าน',
+    example: 'นายสมปอง รักสงบ',
+  })
   deputy_headman_name?: string;
 
-  @ApiPropertyOptional({ description: 'เบอร์โทรติดต่อหมู่บ้าน (ขึ้นบนใบเสร็จ)', example: '0812345678' })
+  @ApiPropertyOptional({
+    description: 'เบอร์โทรติดต่อหมู่บ้าน (ขึ้นบนใบเสร็จ)',
+    example: '0812345678',
+  })
   phone?: string;
 
   @ApiPropertyOptional({

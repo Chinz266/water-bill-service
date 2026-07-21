@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
 import { AccountMemberEntity } from 'src/entity/account-member.entity';
 import { MemberEntity } from 'src/entity/member.entity';
+import { VillageEntity } from 'src/entity/village.entity';
 import { BillsService } from './bills.service';
 
 /**
@@ -21,15 +22,43 @@ export class MemberPortalService {
 
   /** id ของบ้านทั้งหมดที่บัญชีนี้มีสิทธิ์เห็น */
   async getLinkedMemberIds(accountId: number): Promise<number[]> {
-    const links = await this.accountMemberRepository.findBy({ account_id: accountId });
+    const links = await this.accountMemberRepository.findBy({
+      account_id: accountId,
+    });
     return links.map((link) => link.members_id);
   }
 
   // รายชื่อบ้านที่ผูกกับบัญชีนี้ — ให้หน้าเว็บโชว์ตอนเลือกบ้าน (เผื่อดูแลหลายหลัง)
+  // แนบชื่อหมู่บ้านไปด้วย เพราะ /villages เป็นสิทธิ์ admin ลูกบ้านเรียกเองไม่ได้
   async getMyHouses(accountId: number) {
     const memberIds = await this.getLinkedMemberIds(accountId);
     if (memberIds.length === 0) return [];
-    return this.memberRepository.findBy({ id: In(memberIds) });
+
+    const houses = await this.memberRepository.findBy({ id: In(memberIds) });
+
+    const villageIds = [
+      ...new Set(houses.map((h) => h.villages_id).filter(Boolean)),
+    ];
+    const villages = villageIds.length
+      ? await this.memberRepository.manager.findBy(VillageEntity, {
+          id: In(villageIds),
+        })
+      : [];
+    const villageById = new Map(villages.map((v) => [v.id, v]));
+
+    return houses.map((house) => {
+      const village = villageById.get(house.villages_id);
+      return {
+        ...house,
+        village: village
+          ? {
+              id: village.id,
+              village_name: village.village_name,
+              village_no: village.village_no,
+            }
+          : null,
+      };
+    });
   }
 
   // บิลของทุกบ้านที่บัญชีนี้ดูแล

@@ -13,10 +13,16 @@ export class CreateMemberDto {
   @ApiPropertyOptional({ description: 'เบอร์โทรศัพท์', example: '0812345678' })
   phone?: string;
 
-  @ApiPropertyOptional({ description: 'ละติจูด (พิกัดแผนที่บ้าน)', example: 14.979900 })
+  @ApiPropertyOptional({
+    description: 'ละติจูด (พิกัดแผนที่บ้าน)',
+    example: 14.9799,
+  })
   latitude?: number;
 
-  @ApiPropertyOptional({ description: 'ลองจิจูด (พิกัดแผนที่บ้าน)', example: 102.097771 })
+  @ApiPropertyOptional({
+    description: 'ลองจิจูด (พิกัดแผนที่บ้าน)',
+    example: 102.097771,
+  })
   longitude?: number;
 
   @ApiProperty({ description: 'ID ของหมู่บ้านที่ลูกบ้านอาศัยอยู่', example: 1 })

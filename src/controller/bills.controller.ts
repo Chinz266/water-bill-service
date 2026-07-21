@@ -1,10 +1,16 @@
-import { Controller, Get, Post, Body, Param, Patch, Delete } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  Patch,
+  Delete,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { BillsService } from 'src/service/bills.service';
 import { CreateBillDto } from 'src/dto/create-bill.dto';
-import { BillEntity } from '../entity/bill.entity';
 import { Roles } from 'src/auth/roles.decorator';
-
 
 @ApiTags('Bills (บิลเรียกเก็บค่าน้ำ)')
 // 🔐 ทั้ง controller นี้เป็นงานฝั่งผู้ดูแลหมู่บ้าน — ต้องล็อกอินเป็น admin เท่านั้น
@@ -31,7 +37,7 @@ export class BillsController {
   @ApiOperation({ summary: 'ดูประวัติบิลค่าน้ำ' })
   async findAll() {
     // 🌟 เช็คว่ามีคำว่า return คืนค่ากลับไปให้หน้าบ้านไหม
-    return await this.billsService.findAll(); 
+    return await this.billsService.findAll();
   }
 
   @Get(':id')
@@ -48,5 +54,4 @@ export class BillsController {
     // โยนภาระไปให้ billsService จัดการอัปเดต Database
     return await this.billsService.updateStatus(+id, status);
   }
-  
 }

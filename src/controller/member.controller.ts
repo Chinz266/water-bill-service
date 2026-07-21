@@ -11,30 +11,30 @@ import { ApiBearerAuth } from '@nestjs/swagger';
 @ApiBearerAuth()
 @Controller('member')
 export class MemberController {
-    constructor(private readonly memberService: MemberService) {}
+  constructor(private readonly memberService: MemberService) {}
 
-    @Post('/all')
-    findAll() {
-        return this.memberService.findAll();
-    }
+  @Post('/all')
+  findAll() {
+    return this.memberService.findAll();
+  }
 
-    @Post('/find-one')
-    findOne(@Body() userData: MemberRemoveDto) {
-        return this.memberService.findOne(userData.id);
-    }
+  @Post('/find-one')
+  findOne(@Body() userData: MemberRemoveDto) {
+    return this.memberService.findOne(userData.id);
+  }
 
-    @Post('/create')
-    create(@Body() userData: CreateMemberDto) {
-        return this.memberService.create(userData);
-    }
+  @Post('/create')
+  create(@Body() userData: CreateMemberDto) {
+    return this.memberService.create(userData);
+  }
 
-    @Post('/update')
-    update(@Body() userData: CreateMemberDto) {
-        return this.memberService.update(userData);
-    }
+  @Post('/update')
+  update(@Body() userData: CreateMemberDto) {
+    return this.memberService.update(userData);
+  }
 
-    @Post('/remove')
-    remove(@Body() userData: MemberRemoveDto) {
-        return this.memberService.remove(userData);
-    }
+  @Post('/remove')
+  remove(@Body() userData: MemberRemoveDto) {
+    return this.memberService.remove(userData);
+  }
 }

@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { CreateVillageDto } from 'src/dto/create-village.dto';
 import { UpdateVillageDto } from 'src/dto/update-village.dto';
@@ -53,11 +57,15 @@ export class VillagesService {
     const patch: Partial<VillageEntity> = {};
     if (dto.provinces_id !== undefined) patch.provinces_id = dto.provinces_id;
     if (dto.districts_id !== undefined) patch.districts_id = dto.districts_id;
-    if (dto.subdistricts_id !== undefined) patch.subdistricts_id = dto.subdistricts_id;
-    if (dto.headman_name !== undefined) patch.headman_name = clean(dto.headman_name) as string;
-    if (dto.deputy_headman_name !== undefined) patch.deputy_headman_name = clean(dto.deputy_headman_name) as string;
+    if (dto.subdistricts_id !== undefined)
+      patch.subdistricts_id = dto.subdistricts_id;
+    if (dto.headman_name !== undefined)
+      patch.headman_name = clean(dto.headman_name) as string;
+    if (dto.deputy_headman_name !== undefined)
+      patch.deputy_headman_name = clean(dto.deputy_headman_name) as string;
     if (dto.phone !== undefined) patch.phone = clean(dto.phone) as string;
-    if (dto.billing_month !== undefined) patch.billing_month = clean(dto.billing_month) as string;
+    if (dto.billing_month !== undefined)
+      patch.billing_month = clean(dto.billing_month) as string;
 
     // ชื่อหมู่บ้านกับหมู่ที่ห้ามเป็นค่าว่าง เพราะคอลัมน์จริงเป็น NOT NULL
     // ถ้าปล่อยผ่านจะพังเป็น 500 ที่ระดับ MySQL แทนที่จะบอกผู้ใช้ว่ากรอกไม่ครบ

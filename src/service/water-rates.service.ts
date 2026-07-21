@@ -17,7 +17,9 @@ export class WaterRatesService {
   async create(createWaterRateDto: CreateWaterRateDto) {
     // water_rates.create_by ติด Foreign Key กับ admin.id (fk_water_rates_admin1)
     // ถ้าไม่เช็คก่อน MySQL จะโยน ER_NO_REFERENCED_ROW_2 ออกมาเป็น 500 ที่อ่านไม่รู้เรื่อง
-    const admin = await this.adminRepository.findOneBy({ id: createWaterRateDto.create_by });
+    const admin = await this.adminRepository.findOneBy({
+      id: createWaterRateDto.create_by,
+    });
     if (!admin) {
       throw new BadRequestException(
         `ไม่พบผู้ดูแลระบบรหัส ${createWaterRateDto.create_by} กรุณารัน "npm run seed:admin" เพื่อสร้างแอดมินเริ่มต้นก่อนบันทึกเรทค่าน้ำ`,
@@ -27,21 +29,27 @@ export class WaterRatesService {
     // 🌟 ระบบคิดเงินด้วย "เรทที่ Active ล่าสุด" ตัวเดียว — พอตั้งเรทใหม่จึงต้องปิดเรทเก่าให้ด้วย
     //    ไม่งั้นเรท Active จะกองซ้อนกันหลายตัว แล้วประวัติจะบอกไม่ได้ว่าช่วงไหนใช้ราคาเท่าไร
     //    ห่อ transaction เดียว: ปิดเรทเก่า + เปิดเรทใหม่ ต้องสำเร็จหรือล้มเหลวไปด้วยกัน
-    return await this.waterRateRepository.manager.transaction(async (manager) => {
-      if ((createWaterRateDto.status ?? 'Active') === 'Active') {
-        await manager.update(
-          WaterRateEntity,
-          { status: 'Active' },
-          { status: 'Inactive', modify_by: createWaterRateDto.create_by, modify_date: new Date() },
-        );
-      }
+    return await this.waterRateRepository.manager.transaction(
+      async (manager) => {
+        if ((createWaterRateDto.status ?? 'Active') === 'Active') {
+          await manager.update(
+            WaterRateEntity,
+            { status: 'Active' },
+            {
+              status: 'Inactive',
+              modify_by: createWaterRateDto.create_by,
+              modify_date: new Date(),
+            },
+          );
+        }
 
-      const newRate = manager.create(WaterRateEntity, {
-        ...createWaterRateDto,
-        create_date: new Date(),
-      });
-      return await manager.save(newRate);
-    });
+        const newRate = manager.create(WaterRateEntity, {
+          ...createWaterRateDto,
+          create_date: new Date(),
+        });
+        return await manager.save(newRate);
+      },
+    );
   }
 
   async findActive() {

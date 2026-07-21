@@ -1,4 +1,12 @@
-import { Controller, Get, Post, Patch, Body, Param, ParseIntPipe } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Body,
+  Param,
+  ParseIntPipe,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { CreateVillageDto } from 'src/dto/create-village.dto';
 import { UpdateVillageDto } from 'src/dto/update-village.dto';
@@ -36,7 +44,9 @@ export class VillagesController {
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'แก้ไขข้อมูลหมู่บ้าน (หน้าตั้งค่า — admin เท่านั้น)' })
+  @ApiOperation({
+    summary: 'แก้ไขข้อมูลหมู่บ้าน (หน้าตั้งค่า — admin เท่านั้น)',
+  })
   async update(
     // ParseIntPipe กัน id ที่ไม่ใช่ตัวเลข ไม่ให้หลุดไปเป็น NaN แล้วคิวรีเพี้ยน
     @Param('id', ParseIntPipe) id: number,

@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { BillEntity } from 'src/entity/bill.entity';
@@ -15,18 +19,20 @@ export class BillsService {
 
     @InjectRepository(WaterRateEntity)
     private readonly waterRateRepository: Repository<WaterRateEntity>, // เรียกใช้ตารางเรทค่าน้ำ
-  ) { }
+  ) {}
 
   // ฟังก์ชันสร้างบิลพร้อมคำนวณอัตโนมัติ
   async create(createBillDto: CreateBillDto) {
     // 1. ป้องกัน Error จากการจดเลขผิด
     if (createBillDto.current_unit < createBillDto.previous_unit) {
-      throw new BadRequestException('หน่วยมิเตอร์ปัจจุบันต้องไม่น้อยกว่าเดือนที่แล้ว');
+      throw new BadRequestException(
+        'หน่วยมิเตอร์ปัจจุบันต้องไม่น้อยกว่าเดือนที่แล้ว',
+      );
     }
 
     // 2. ดึงเรทค่าน้ำจาก Database มาเพื่อความชัวร์ (ไม่เชื่อใจราคาที่อาจถูกส่งมาจากหน้าบ้าน)
     const rate = await this.waterRateRepository.findOne({
-      where: { id: createBillDto.water_rates_id }
+      where: { id: createBillDto.water_rates_id },
     });
 
     if (!rate) {
@@ -36,12 +42,12 @@ export class BillsService {
     // 3. คำนวณหาหน่วยที่ใช้ไป และยอดเงินรวม
     // price_per_unit เป็น decimal ใน MySQL ซึ่ง TypeORM คืนมาเป็น string ('15.00') ต้องแปลงก่อนคูณ
     const usage_unit = createBillDto.current_unit - createBillDto.previous_unit;
-    const total_amount = usage_unit * Number(rate.price_per_unit)
+    const total_amount = usage_unit * Number(rate.price_per_unit);
 
     // 4. นำข้อมูลมาผูกรวมกัน โดยบังคับใช้ยอดที่เราคำนวณเอง
     const newBill = this.billRepository.create({
       ...createBillDto,
-      usage_unit: usage_unit,     // เขียนทับด้วยค่าที่คำนวณได้
+      usage_unit: usage_unit, // เขียนทับด้วยค่าที่คำนวณได้
       total_amount: total_amount, // เขียนทับด้วยยอดเงินที่ถูกต้อง
       // 🌟 กำหนดค่าเองให้ชัดเจน กัน payment_status = NULL และ create_date = 0000-00-00
       payment_status: createBillDto.payment_status ?? 'Pending',
@@ -57,7 +63,11 @@ export class BillsService {
   private billDetailQuery() {
     return this.billRepository
       .createQueryBuilder('bill')
-      .leftJoin(MeterReadingEntity, 'reading', 'reading.id = bill.meter_readings_id')
+      .leftJoin(
+        MeterReadingEntity,
+        'reading',
+        'reading.id = bill.meter_readings_id',
+      )
       .leftJoin(MemberEntity, 'member', 'member.id = reading.members_id')
       .leftJoin(WaterRateEntity, 'rate', 'rate.id = bill.water_rates_id')
       .addSelect([
@@ -78,7 +88,10 @@ export class BillsService {
     return {
       ...bill,
       // decimal ของ MySQL กลับมาเป็น string ต้องแปลงก่อนส่งให้หน้าเว็บ
-      price_per_unit: row?.rate_price_per_unit != null ? Number(row.rate_price_per_unit) : null,
+      price_per_unit:
+        row?.rate_price_per_unit != null
+          ? Number(row.rate_price_per_unit)
+          : null,
       meter_reading: row?.reading_id
         ? {
             id: row.reading_id,
@@ -134,7 +147,9 @@ export class BillsService {
 
   async updateStatus(id: number, payment_status: string) {
     // ใช้ as any เพื่อบอก TypeScript ว่าไม่ต้องห่วงเรื่อง Type
-    await this.billRepository.update(id, { payment_status: payment_status as any });
+    await this.billRepository.update(id, {
+      payment_status: payment_status as any,
+    });
 
     return await this.billRepository.findOne({ where: { id } });
   }

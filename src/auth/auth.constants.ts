@@ -11,9 +11,9 @@ export type UserRole = 'admin' | 'member';
 
 /** ข้อมูลที่ฝังอยู่ใน JWT และถูกแปะไว้ที่ request.user หลังผ่าน guard */
 export interface JwtPayload {
-    /** id ของบัญชี (มาตรฐาน JWT ใช้ชื่อ sub) */
-    sub: number;
-    // 🌟 nullable เพราะบัญชีลูกบ้าน (role='member') ล็อกอินด้วยเบอร์ ไม่มีอีเมล
-    email: string | null;
-    role: UserRole;
+  /** id ของบัญชี (มาตรฐาน JWT ใช้ชื่อ sub) */
+  sub: number;
+  // 🌟 nullable เพราะบัญชีลูกบ้าน (role='member') ล็อกอินด้วยเบอร์ ไม่มีอีเมล
+  email: string | null;
+  role: UserRole;
 }

@@ -24,7 +24,9 @@ export class MemberPortalController {
   }
 
   @Get('bills')
-  @ApiOperation({ summary: 'บิลของบ้านตัวเอง (ทุกหลังที่ดูแล) พร้อมสถานะการชำระเงิน' })
+  @ApiOperation({
+    summary: 'บิลของบ้านตัวเอง (ทุกหลังที่ดูแล) พร้อมสถานะการชำระเงิน',
+  })
   getMyBills(@CurrentUser() user: JwtPayload) {
     return this.memberPortalService.getMyBills(user.sub);
   }

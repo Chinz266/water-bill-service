@@ -11,8 +11,10 @@ import { JwtPayload } from './auth.constants';
  *    ต้องอ่านจาก token ที่เซิร์ฟเวอร์เซ็นเองเท่านั้น
  */
 export const CurrentUser = createParamDecorator(
-    (_data: unknown, context: ExecutionContext): JwtPayload | undefined => {
-        const request = context.switchToHttp().getRequest<Request & { user?: JwtPayload }>();
-        return request.user;
-    },
+  (_data: unknown, context: ExecutionContext): JwtPayload | undefined => {
+    const request = context
+      .switchToHttp()
+      .getRequest<Request & { user?: JwtPayload }>();
+    return request.user;
+  },
 );

@@ -13,8 +13,8 @@ export class CreateBillDto {
   @ApiProperty({ description: 'หน่วยมิเตอร์เดือนนี้', example: 1250 })
   current_unit!: number;
 
-//   @ApiProperty({ description: 'หน่วยน้ำที่ใช้ไป (เดือนนี้ - เดือนที่แล้ว)', example: 50 })
-//   usage_unit!: number;
+  //   @ApiProperty({ description: 'หน่วยน้ำที่ใช้ไป (เดือนนี้ - เดือนที่แล้ว)', example: 50 })
+  //   usage_unit!: number;
 
   // @ApiProperty({ description: 'ยอดรวมที่ต้องชำระ (บาท)', example: 750.00 })
   // total_amount!: number;
@@ -29,7 +29,7 @@ export class CreateBillDto {
     description: 'สถานะการจ่ายเงิน',
     enum: ['Pending', 'Paid', 'Overdue'],
     default: 'Pending',
-    example: 'Pending'
+    example: 'Pending',
   })
   payment_status?: 'Pending' | 'Paid' | 'Overdue';
 
