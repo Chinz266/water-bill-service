@@ -21,4 +21,10 @@ export class AdminCreateDto {
 
   @ApiProperty({ description: 'Role of the admin', example: 'admin' })
   role!: string;
+
+  @ApiProperty({
+    description: 'รูปโปรไฟล์แบบ base64 data URL (ย่อขนาดจากฝั่งเว็บแล้ว) หรือ null เพื่อลบรูป',
+    required: false,
+  })
+  photo?: string | null;
 }
