@@ -27,6 +27,11 @@ export class AdminEntity {
   @Column({ type: 'varchar', length: 45, nullable: true })
   role!: string;
 
+  // 🌟 รูปโปรไฟล์ผู้ดูแล เก็บเป็น base64 data URL (ย่อขนาดจากฝั่งเว็บก่อนแล้ว)
+  //    MEDIUMTEXT เพราะ varchar สั้นเกินเก็บ base64 ไม่พอ
+  @Column({ type: 'mediumtext', nullable: true })
+  photo!: string | null;
+
   @Column({ type: 'datetime', name: 'create_date' })
   createDate!: Date;
 

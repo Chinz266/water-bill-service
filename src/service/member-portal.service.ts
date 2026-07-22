@@ -4,6 +4,7 @@ import { Repository, In } from 'typeorm';
 import { AccountMemberEntity } from 'src/entity/account-member.entity';
 import { MemberEntity } from 'src/entity/member.entity';
 import { VillageEntity } from 'src/entity/village.entity';
+import { AdminEntity } from 'src/entity/admin.entity';
 import { BillsService } from './bills.service';
 
 /**
@@ -65,5 +66,16 @@ export class MemberPortalService {
   async getMyBills(accountId: number) {
     const memberIds = await this.getLinkedMemberIds(accountId);
     return this.billsService.findAllForMembers(memberIds);
+  }
+
+  // ข้อมูลผู้ดูแลไว้ให้ลูกบ้านติดต่อ (เช่น ถามเรื่องชำระเงิน)
+  // ส่งเฉพาะชื่อกับเบอร์ ไม่แตะอีเมล/รหัสผ่าน — /admin/all เป็นสิทธิ์ admin ลูกบ้านเรียกเองไม่ได้
+  async getAdminContacts() {
+    const admins = await this.memberRepository.manager.find(AdminEntity, {
+      where: { role: 'admin' },
+      select: { id: true, fname: true, lname: true, phone: true, photo: true },
+      order: { id: 'ASC' },
+    });
+    return admins;
   }
 }

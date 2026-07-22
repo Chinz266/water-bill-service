@@ -30,4 +30,10 @@ export class MemberPortalController {
   getMyBills(@CurrentUser() user: JwtPayload) {
     return this.memberPortalService.getMyBills(user.sub);
   }
+
+  @Get('admins')
+  @ApiOperation({ summary: 'ข้อมูลผู้ดูแลไว้ติดต่อ (ชื่อ + เบอร์โทร)' })
+  getAdminContacts() {
+    return this.memberPortalService.getAdminContacts();
+  }
 }
