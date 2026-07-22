@@ -15,6 +15,11 @@
 
 USE `water-bill-db`;
 
+-- 🌟 บังคับ charset ของ connection เป็น utf8mb4 ก่อนเสมอ
+--    ถ้าไม่ตั้ง ไคลเอนต์บน Windows จะ default เป็น tis620/cp874 แล้วภาษาไทยจะถูกเข้ารหัสซ้อนสองชั้น
+--    เก็บลง DB เป็น "เธชเธกเธเธฒเธข" แทน "สมชาย" (ซึ่งต้องมาไล่แปลงกลับทีหลัง)
+SET NAMES utf8mb4;
+
 -- หมายเหตุ: admin id=1 มาจาก `npm run seed:admin` (ดูขั้นตอนด้านบน) จึงไม่ insert ซ้ำที่นี่
 
 -- 2) หมู่บ้าน (members.villages_id -> villages.id) ใช้ province/district/subdistrict id=1 ที่มีข้อมูลอยู่แล้ว

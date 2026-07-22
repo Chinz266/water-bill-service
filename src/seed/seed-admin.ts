@@ -79,6 +79,16 @@ async function ensureAdminSchema(runner: QueryRunner): Promise<void> {
     );
   }
 
+  // 🌟 รูปโปรไฟล์เก็บเป็น base64 data URL จึงต้องเป็น MEDIUMTEXT (varchar สั้นเกิน)
+  //    ⚠️ ต้องเติมคอลัมน์นี้ "ก่อน" ที่สคริปต์จะเรียก repository.find() ข้างล่าง
+  //    ไม่งั้น TypeORM จะ SELECT คอลัมน์ photo แล้วพังด้วย Unknown column ตั้งแต่ยังกู้อะไรไม่ได้เลย
+  if (!has('photo')) {
+    console.log('🔧 เพิ่มคอลัมน์ admin.photo');
+    await runner.query(
+      'ALTER TABLE `admin` ADD COLUMN `photo` mediumtext NULL',
+    );
+  }
+
   // 🌟 bcrypt hash ยาว 60 ตัว แต่ schema เดิมเป็น varchar(45)
   //    ถ้าไม่ขยายก่อน MySQL จะตัด hash ทิ้งเงียบ ๆ แล้วล็อกอินไม่ผ่านตลอดกาล
   const passwordColumn: { Type: string }[] = await runner.query(

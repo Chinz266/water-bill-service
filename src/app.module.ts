@@ -32,6 +32,9 @@ import { AuthService } from './service/auth.service';
 import { MemberPortalController } from './controller/member-portal.controller';
 import { MemberPortalService } from './service/member-portal.service';
 import { LocationsController } from './controller/locations.controller';
+import { ReportEntity } from './entity/report.entity';
+import { ReportsController } from './controller/reports.controller';
+import { ReportsService } from './service/reports.service';
 import {
   ProvinceEntity,
   DistrictEntity,
@@ -51,7 +54,7 @@ import {
       database: 'water-bill-db', // ใส่ชื่อฐานข้อมูลที่คุณสร้างไว้
       charset: 'utf8mb4', // 🌟 บังคับ connection เป็น utf8mb4 ไม่งั้นภาษาไทยจะเก็บเป็น ????? (เพี้ยน)
       entities: [__dirname + '/**/*.entity{.ts,.js}'],
-      synchronize: false, // แนะนำให้เปิด true แค่ตอน Dev (มันจะสร้างตารางให้ตาม Entity อัตโนมัติ)
+      synchronize: false, 
     }),
     // 🔐 อ่านกุญแจเซ็น JWT จาก .env — ถ้าไม่ตั้งไว้จะโยน error ตั้งแต่ตอน boot
     //    ตั้งใจให้ล้มเลยดีกว่าปล่อยให้ระบบรันด้วย secret ค่าว่าง ซึ่งใครก็ปลอม token ได้
@@ -83,6 +86,7 @@ import {
       VillageEntity,
       MeterReadingEntity,
       BillEntity,
+      ReportEntity,
       ProvinceEntity,
       DistrictEntity,
       SubdistrictEntity,
@@ -99,6 +103,7 @@ import {
     AuthController,
     MemberPortalController,
     LocationsController,
+    ReportsController,
   ],
   providers: [
     AppService,
@@ -110,6 +115,7 @@ import {
     BillsService,
     AuthService,
     MemberPortalService,
+    ReportsService,
     // 🔐 ตั้ง guard เป็น global = ทุก endpoint ปิดไว้ก่อนเป็นค่าเริ่มต้น
     //    route ไหนที่ตั้งใจเปิดสาธารณะต้องแปะ @Public() เอง
     //    ปลอดภัยกว่าไล่แปะ guard ทีละ route เพราะ "ลืมแปะ = ปิด" ไม่ใช่ "ลืมแปะ = เปิดทิ้ง"

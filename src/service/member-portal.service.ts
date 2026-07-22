@@ -6,6 +6,8 @@ import { MemberEntity } from 'src/entity/member.entity';
 import { VillageEntity } from 'src/entity/village.entity';
 import { AdminEntity } from 'src/entity/admin.entity';
 import { BillsService } from './bills.service';
+import { ReportsService } from './reports.service';
+import { CreateReportDto } from 'src/dto/create-report.dto';
 
 /**
  * สิ่งที่ลูกบ้านเห็นได้เอง — ต่างจาก MemberService (ฝั่งแอดมินจัดการทุกบ้าน)
@@ -19,6 +21,7 @@ export class MemberPortalService {
     @InjectRepository(MemberEntity)
     private readonly memberRepository: Repository<MemberEntity>,
     private readonly billsService: BillsService,
+    private readonly reportsService: ReportsService,
   ) {}
 
   /** id ของบ้านทั้งหมดที่บัญชีนี้มีสิทธิ์เห็น */
@@ -66,6 +69,25 @@ export class MemberPortalService {
   async getMyBills(accountId: number) {
     const memberIds = await this.getLinkedMemberIds(accountId);
     return this.billsService.findAllForMembers(memberIds);
+  }
+
+  // ==========================================
+  // เรื่องที่แจ้งเข้าไปหาผู้ดูแล
+  // ==========================================
+
+  /** เรื่องที่แจ้งไว้ของทุกบ้านที่บัญชีนี้ดูแล (พร้อมคำตอบจากแอดมิน ถ้ามี) */
+  async getMyReports(accountId: number) {
+    const memberIds = await this.getLinkedMemberIds(accountId);
+    return this.reportsService.findAllForMembers(memberIds);
+  }
+
+  /**
+   * ส่งเรื่องใหม่
+   * ส่งรายการบ้านที่บัญชีนี้ดูแลไปให้ ReportsService ตรวจว่า members_id ที่แนบมาเป็นของตัวเองจริง
+   */
+  async createMyReport(accountId: number, dto: CreateReportDto) {
+    const memberIds = await this.getLinkedMemberIds(accountId);
+    return this.reportsService.create(accountId, dto, memberIds);
   }
 
   // ข้อมูลผู้ดูแลไว้ให้ลูกบ้านติดต่อ (เช่น ถามเรื่องชำระเงิน)

@@ -1,6 +1,7 @@
-import { Controller, Get } from '@nestjs/common';
+import { Body, Controller, Get, Post } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { MemberPortalService } from 'src/service/member-portal.service';
+import { CreateReportDto } from 'src/dto/create-report.dto';
 import { Roles } from 'src/auth/roles.decorator';
 import { CurrentUser } from 'src/auth/current-user.decorator';
 import type { JwtPayload } from 'src/auth/auth.constants';
@@ -35,5 +36,23 @@ export class MemberPortalController {
   @ApiOperation({ summary: 'ข้อมูลผู้ดูแลไว้ติดต่อ (ชื่อ + เบอร์โทร)' })
   getAdminContacts() {
     return this.memberPortalService.getAdminContacts();
+  }
+
+  @Get('reports')
+  @ApiOperation({
+    summary: 'เรื่องที่แจ้งไว้ของบ้านตัวเอง พร้อมคำตอบจากผู้ดูแล',
+  })
+  getMyReports(@CurrentUser() user: JwtPayload) {
+    return this.memberPortalService.getMyReports(user.sub);
+  }
+
+  @Post('reports')
+  @ApiOperation({ summary: 'แจ้งเรื่องใหม่ไปหาผู้ดูแลหมู่บ้าน' })
+  createMyReport(
+    @CurrentUser() user: JwtPayload,
+    @Body() createReportDto: CreateReportDto,
+  ) {
+    // account_id อ่านจาก token เสมอ ไม่รับจาก body (กันแจ้งแทนบัญชีคนอื่น)
+    return this.memberPortalService.createMyReport(user.sub, createReportDto);
   }
 }
