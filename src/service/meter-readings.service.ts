@@ -5,7 +5,6 @@ import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 import FormData from 'form-data';
-import ExifReader from 'exifreader';
 import { MeterReadingEntity } from '../entity/meter-reading.entity'; // เช็ค Path ให้ตรงกับโครงสร้างโฟลเดอร์ของคุณนะครับ
 import { AdminEntity } from '../entity/admin.entity';
 import { MemberEntity } from '../entity/member.entity';
@@ -83,28 +82,6 @@ export class MeterReadingsService {
     const startTime = Date.now();
     this.logger.log('Starting water meter reading via YOLO vision service...');
 
-    let latitude: string | null = null;
-    let longitude: string | null = null;
-    let captureDate: string | null = null;
-
-    try {
-      // สกัดข้อมูล EXIF จากภาพ
-      const tags = ExifReader.load(imageBuffer);
-      
-      if (tags['DateTimeOriginal']) {
-        captureDate = tags['DateTimeOriginal'].description;
-      }
-      
-      if (tags['GPSLatitude'] && tags['GPSLongitude']) {
-        latitude = tags['GPSLatitude'].description;
-        longitude = tags['GPSLongitude'].description;
-      }
-      
-      this.logger.log(`EXIF extracted - Lat: ${latitude}, Lng: ${longitude}, Date: ${captureDate}`);
-    } catch (error) {
-      this.logger.warn('ไม่สามารถอ่าน EXIF metadata จากรูปภาพได้ หรือรูปอาจไม่มีข้อมูลฝังมา');
-    }
-
     try {
       // เตรียม multipart form ส่งรูปไปให้ Python service
       const form = new FormData();
@@ -145,11 +122,6 @@ export class MeterReadingsService {
           // ส่ง confidence ต่อให้หน้าเว็บด้วย เอาไว้ทำแถบบอกว่าอ่านได้ชัดแค่ไหน
           confidence: data.confidence,
           message: 'สกัดค่าตัวเลขสำเร็จ',
-          metadata: {
-            latitude,
-            longitude,
-            captureDate,
-          },
         };
       }
 
@@ -162,11 +134,6 @@ export class MeterReadingsService {
         message:
           data.message ||
           'วิเคราะห์ภาพแล้ว แต่ได้ตัวเลขไม่ครบถ้วน กรุณาถ่ายให้ชัดเจนขึ้น',
-        metadata: {
-          latitude,
-          longitude,
-          captureDate,
-        },
       };
     } catch (error) {
       // แยกกรณีต่อ Python service ไม่ติด ออกจาก error อื่นๆ เพื่อ debug ง่าย
