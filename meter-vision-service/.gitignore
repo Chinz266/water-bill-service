@@ -1,4 +1,11 @@
+# Virtualenv (รองรับทั้ง .venv และ venv)
+.venv/
 venv/
+env/
+
+# Python cache
 __pycache__/
-*.pyc
+*.py[cod]
+
+# Secrets
 .env

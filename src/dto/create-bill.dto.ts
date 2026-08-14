@@ -35,4 +35,19 @@ export class CreateBillDto {
 
   @ApiPropertyOptional({ description: 'ID ของ Admin ผู้สร้างบิล', example: 1 })
   create_by?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'ยืนยันจดทับบิลเดือนเดียวกันที่มีอยู่แล้ว (ลบใบเดิมทิ้งก่อนสร้างใหม่) — ' +
+      'ไม่ส่งมา = ถ้าเจอบิลซ้ำเดือนจะตอบ 409 กลับไป',
+    default: false,
+  })
+  replace?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'ยืนยันว่าหน่วยน้ำที่สูงผิดปกตินั้นถูกต้องจริง — ไม่ส่งมาแล้วเข้าเกณฑ์ผิดปกติจะตอบ 409',
+    default: false,
+  })
+  confirm_high_usage?: boolean;
 }

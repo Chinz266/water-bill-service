@@ -24,6 +24,7 @@ import { VillageEntity } from './entity/village.entity';
 import { MeterReadingEntity } from './entity/meter-reading.entity';
 import { MeterReadingsController } from './controller/meter-readings.controller';
 import { MeterReadingsService } from './service/meter-readings.service';
+import { MeterPhotoService } from './service/meter-photo.service';
 import { BillEntity } from './entity/bill.entity';
 import { BillsService } from './service/bills.service';
 import { BillsController } from './controller/bills.controller';
@@ -32,6 +33,9 @@ import { AuthService } from './service/auth.service';
 import { MemberPortalController } from './controller/member-portal.controller';
 import { MemberPortalService } from './service/member-portal.service';
 import { LocationsController } from './controller/locations.controller';
+import { ReportEntity } from './entity/report.entity';
+import { ReportsController } from './controller/reports.controller';
+import { ReportsService } from './service/reports.service';
 import {
   ProvinceEntity,
   DistrictEntity,
@@ -83,6 +87,7 @@ import {
       VillageEntity,
       MeterReadingEntity,
       BillEntity,
+      ReportEntity,
       ProvinceEntity,
       DistrictEntity,
       SubdistrictEntity,
@@ -99,6 +104,7 @@ import {
     AuthController,
     MemberPortalController,
     LocationsController,
+    ReportsController,
   ],
   providers: [
     AppService,
@@ -107,9 +113,11 @@ import {
     WaterRatesService,
     VillagesService,
     MeterReadingsService,
+    MeterPhotoService,
     BillsService,
     AuthService,
     MemberPortalService,
+    ReportsService,
     // 🔐 ตั้ง guard เป็น global = ทุก endpoint ปิดไว้ก่อนเป็นค่าเริ่มต้น
     //    route ไหนที่ตั้งใจเปิดสาธารณะต้องแปะ @Public() เอง
     //    ปลอดภัยกว่าไล่แปะ guard ทีละ route เพราะ "ลืมแปะ = ปิด" ไม่ใช่ "ลืมแปะ = เปิดทิ้ง"
