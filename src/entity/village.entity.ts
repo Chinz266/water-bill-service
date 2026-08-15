@@ -20,6 +20,11 @@ export class VillageEntity {
   @Column()
   subdistricts_id!: number;
 
+  // เก็บแยกจาก subdistricts.zip_code เพราะตารางนั้นเป็นข้อมูลอ้างอิงที่ใช้ร่วมกัน
+  // ทั้งระบบ และรหัสของบางตำบลก็ว่าง/ไม่ตรง — ดู db/migrate-village-zipcode.sql
+  @Column({ length: 5, nullable: true })
+  zip_code!: string;
+
   @Column({ length: 200 })
   village_name!: string;
 

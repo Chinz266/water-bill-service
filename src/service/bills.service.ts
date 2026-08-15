@@ -10,6 +10,12 @@ import { BillEntity, PAYMENT_STATUSES } from 'src/entity/bill.entity';
 import { WaterRateEntity } from '../entity/water-rate.entity'; // ปรับ Path ให้ตรงกับโฟลเดอร์ของคุณ
 import { MeterReadingEntity } from '../entity/meter-reading.entity';
 import { MemberEntity } from '../entity/member.entity';
+import { VillageEntity } from '../entity/village.entity';
+import {
+  ProvinceEntity,
+  DistrictEntity,
+  SubdistrictEntity,
+} from '../entity/location.entity';
 import { CreateBillDto } from 'src/dto/create-bill.dto';
 import { CreateBillFromScanDto } from 'src/dto/create-bill-from-scan.dto';
 import { MeterPhotoService } from './meter-photo.service';
@@ -29,6 +35,13 @@ interface BillDetailRow {
   member_fname?: string | null;
   member_lname?: string | null;
   member_phone?: string | null;
+  village_id?: number | null;
+  village_village_name?: string | null;
+  village_village_no?: string | null;
+  village_zip_code?: string | null;
+  subdistrict_name_in_thai?: string | null;
+  district_name_in_thai?: string | null;
+  province_name_in_thai?: string | null;
 }
 
 @Injectable()
@@ -1098,6 +1111,25 @@ export class BillsService {
       )
       .leftJoin(MemberEntity, 'member', 'member.id = reading.members_id')
       .leftJoin(WaterRateEntity, 'rate', 'rate.id = bill.water_rates_id')
+      // ที่อยู่หมู่บ้านติดมากับบิลเลย เพราะบิลถูกพิมพ์จากทั้งฝั่งแอดมินและพอร์ทัลลูกบ้าน
+      // แต่ /villages เป็นสิทธิ์ admin ลูกบ้านจึงไปดึงเองไม่ได้ ถ้าไม่แนบมาตรงนี้
+      // ใบเสร็จของสองฝั่งจะมีที่อยู่ไม่เหมือนกัน
+      .leftJoin(VillageEntity, 'village', 'village.id = member.villages_id')
+      .leftJoin(
+        SubdistrictEntity,
+        'subdistrict',
+        'subdistrict.id = village.subdistricts_id',
+      )
+      .leftJoin(
+        DistrictEntity,
+        'district',
+        'district.id = village.districts_id',
+      )
+      .leftJoin(
+        ProvinceEntity,
+        'province',
+        'province.id = village.provinces_id',
+      )
       .addSelect([
         'reading.id',
         'reading.reading_date',
@@ -1110,6 +1142,13 @@ export class BillsService {
         'member.lname',
         'member.phone',
         'rate.price_per_unit',
+        'village.id',
+        'village.village_name',
+        'village.village_no',
+        'village.zip_code',
+        'subdistrict.name_in_thai',
+        'district.name_in_thai',
+        'province.name_in_thai',
       ]);
   }
 
@@ -1139,6 +1178,20 @@ export class BillsService {
             fname: row.member_fname,
             lname: row.member_lname,
             phone: row.member_phone,
+            // หมู่บ้านของบ้านหลังนี้ — ส่งชื่อไทยของตำบล/อำเภอ/จังหวัดมาเลย
+            // ไม่ส่งแค่ id เพราะใบเสร็จต้องพิมพ์เป็นข้อความ ถ้าให้หน้าเว็บไปแปลงเอง
+            // ต้องยิง /locations เพิ่มอีกสามรอบต่อการพิมพ์หนึ่งครั้ง
+            village: row.village_id
+              ? {
+                  id: row.village_id,
+                  village_name: row.village_village_name,
+                  village_no: row.village_village_no,
+                  subdistrict: row.subdistrict_name_in_thai ?? null,
+                  district: row.district_name_in_thai ?? null,
+                  province: row.province_name_in_thai ?? null,
+                  zip_code: row.village_zip_code ?? null,
+                }
+              : null,
           }
         : null,
     };

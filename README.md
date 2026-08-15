@@ -87,10 +87,12 @@ ng serve
 | `db/migrate-longitude-precision.sql` | ขยาย `members.longitude` เป็น `decimal(11,8)`                  | ฐานข้อมูลที่ import จาก dump รุ่นเก่า |
 | `db/migrate-reading-location.sql`    | เพิ่ม `latitude` / `longitude` / `gps_accuracy_m` / `captured_at` ให้ `meter_readings` | ทุกฐานข้อมูล (ยังไม่อยู่ใน dump)      |
 | `db/migrate-meter-digits.sql`        | เพิ่ม `meter_digits` ให้ `meter_readings` (ด่านกัน OCR อ่านหลักหาย/เกิน) | ทุกฐานข้อมูล (ยังไม่อยู่ใน dump)      |
+| `db/migrate-village-zipcode.sql`     | เพิ่ม `zip_code` ให้ `villages` แล้วเติมค่าเริ่มต้นจากตำบลที่เลือกไว้ | ทุกฐานข้อมูล (ยังไม่อยู่ใน dump)      |
 
 ```powershell
 & "C:\xampp\mysql\bin\mysql.exe" -u root water-bill-db < db\migrate-reading-location.sql
 & "C:\xampp\mysql\bin\mysql.exe" -u root water-bill-db < db\migrate-meter-digits.sql
+& "C:\xampp\mysql\bin\mysql.exe" -u root water-bill-db < db\migrate-village-zipcode.sql
 ```
 
 **เรื่อง `decimal(11,8)`** — ลองจิจูดของไทยอยู่ที่ 97–106 ซึ่งเป็นเลข 3 หลักหน้าจุดทศนิยม แต่ `decimal(10,8)` เหลือที่ให้แค่ 2 หลัก (สูงสุด `99.99999999`) ทุกจังหวัดตั้งแต่ลองจิจูด 100 ขึ้นไป (กรุงเทพ 100.5, โคราช 102.1) จึงบันทึกไม่ได้ — strict mode เด้ง error 1264, ไม่ strict ก็โดนตัดเหลือ `99.99999999` เงียบ ๆ พิกัดเพี้ยนไปหลายร้อยกิโลเมตร
@@ -443,6 +445,8 @@ npm test
 **`Unknown column 'MeterReadingEntity.latitude'`** — ยังไม่ได้รัน `db/migrate-reading-location.sql`
 
 **`Unknown column 'MeterReadingEntity.meter_digits'`** — ยังไม่ได้รัน `db/migrate-meter-digits.sql`
+
+**`Unknown column 'VillageEntity.zip_code'`** — ยังไม่ได้รัน `db/migrate-village-zipcode.sql`
 
 **ต้องเปิด MySQL ก่อน backend เสมอ** ไม่งั้น TypeORM ต่อไม่ติดตอน bootstrap
 

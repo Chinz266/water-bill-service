@@ -31,6 +31,12 @@ export class UpdateVillageDto {
   subdistricts_id?: number;
 
   @ApiPropertyOptional({
+    description: 'รหัสไปรษณีย์ 5 หลัก (ส่งค่าว่างมาเพื่อล้างเป็น NULL ได้)',
+    example: '30130',
+  })
+  zip_code?: string;
+
+  @ApiPropertyOptional({
     description: 'ชื่อหมู่บ้าน',
     example: 'หมู่บ้านจัดสรรอยู่สบาย',
   })

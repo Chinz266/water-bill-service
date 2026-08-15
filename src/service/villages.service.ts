@@ -84,6 +84,19 @@ export class VillagesService {
       patch.village_no = no;
     }
 
+    // รหัสไปรษณีย์ไทยเป็นเลข 5 หลักเสมอ ต้องเช็คเองตั้งแต่ตรงนี้เพราะคอลัมน์เป็น
+    // varchar(5) — เลขเกินมาจะโดน MySQL ตัดท้ายทิ้งเงียบ ๆ แทนที่จะฟ้องว่าผิด
+    // ปล่อยว่างได้ (เป็น NULL) เพราะหมู่บ้านที่ยังไม่ได้กรอกก็ออกบิลได้ตามปกติ
+    if (dto.zip_code !== undefined) {
+      const zip = clean(dto.zip_code);
+      if (zip && !/^\d{5}$/.test(zip)) {
+        throw new UnprocessableEntityException(
+          'รหัสไปรษณีย์ต้องเป็นตัวเลข 5 หลัก',
+        );
+      }
+      patch.zip_code = zip as string;
+    }
+
     patch.modify_by = modifiedBy;
 
     const merged = this.villageRepository.merge(village, patch);

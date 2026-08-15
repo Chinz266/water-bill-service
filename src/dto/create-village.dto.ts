@@ -19,6 +19,12 @@ export class CreateVillageDto {
   })
   subdistricts_id!: number;
 
+  @ApiPropertyOptional({
+    description: 'รหัสไปรษณีย์ 5 หลัก',
+    example: '30130',
+  })
+  zip_code?: string;
+
   @ApiProperty({
     description: 'ชื่อหมู่บ้าน',
     example: 'หมู่บ้านจัดสรรอยู่สบาย',
