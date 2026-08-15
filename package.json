@@ -8,7 +8,8 @@
   "scripts": {
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\" \"scripts/**/*.ts\"",
-    "start": "nest start",
+    "prestart": "ts-node -T scripts/free-ports.ts",
+    "start": "concurrently -n api,vision -c cyan,magenta --kill-others-on-fail \"nest start\" \"npm:start:vision\"",
     "prestart:dev": "ts-node -T scripts/free-ports.ts",
     "start:dev": "concurrently -n api,vision -c cyan,magenta --kill-others-on-fail \"npm:start:api\" \"npm:start:vision\"",
     "free-ports": "ts-node -T scripts/free-ports.ts",
