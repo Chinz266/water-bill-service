@@ -30,6 +30,15 @@ export class CreateBillFromScanDto {
   @ApiPropertyOptional({ description: 'ID ของ Admin ผู้จด', example: 1 })
   create_by?: number;
 
+  @ApiPropertyOptional({
+    description:
+      'จำนวนหลักบนหน้าปัดที่ OCR ตรวจเจอ (ค่า meter_digits จาก /meter-readings/ocr-upload) — ' +
+      'ส่งมาด้วยแล้วระบบจะเทียบกับครั้งก่อนของบ้านหลังนี้ เพื่อจับเคสอ่านหลักหาย/หลักเกิน ' +
+      'ไม่ส่งมา (เช่นกรอกเลขเอง) จะข้ามด่านนี้ไป',
+    example: 5,
+  })
+  meter_digits?: number;
+
   // ── พิกัดของจุดที่ยืนถ่ายรูป ────────────────────────────────────────────
   // ควรมาจาก navigator.geolocation.getCurrentPosition() ตอนกดชัตเตอร์
   // ไม่ใช่จาก EXIF เพราะหน้าเว็บย่อรูปด้วย canvas ก่อนส่ง EXIF จึงหายไปแล้ว
@@ -71,6 +80,14 @@ export class CreateBillFromScanDto {
     default: false,
   })
   confirm_high_usage?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'ยืนยันว่าจำนวนหลักบนหน้าปัดที่ต่างจากเดือนก่อนนั้นถูกต้องจริง — ' +
+      'ใช้เมื่อเปลี่ยนมิเตอร์เป็นรุ่นที่หลักไม่เท่าเดิม หรือคนตรวจดูรูปแล้วยืนยันว่า OCR อ่านถูก',
+    default: false,
+  })
+  confirm_digit_change?: boolean;
 
   @ApiPropertyOptional({
     description:

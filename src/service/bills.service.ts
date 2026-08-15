@@ -283,6 +283,28 @@ export class BillsService {
     return result;
   }
 
+  /**
+   * จำนวนหลักบนหน้าปัดที่แต่ละบ้านอ่านได้ล่าสุด — ใช้จับเคส OCR อ่านหลักหาย/หลักเกิน
+   *
+   * ไม่ต้องหาค่าที่พบบ่อยที่สุดหรือค่ามัธยฐาน เพราะจำนวนหลักไม่ใช่ค่าที่มี noise
+   * แบบพิกัด GPS — มิเตอร์ตัวหนึ่งมีกี่หลักก็เท่านั้นตลอด ค่าที่ต่างออกไปคือความผิดพลาด
+   * ไม่ใช่ความคลาดเคลื่อน จึงใช้ "ครั้งล่าสุดที่รู้" ตรง ๆ ซึ่งสะท้อนการเปลี่ยนมิเตอร์ด้วย
+   *
+   * ข้ามแถวที่เป็น null (การจดที่กรอกมือ ไม่ได้ผ่าน OCR) — ไม่ใช่นับเป็น 0
+   */
+  knownMeterDigits(readings: MeterReadingEntity[]): Map<number, number> {
+    const result = new Map<number, number>();
+
+    // readings เรียงจากเก่าไปใหม่ การทับค่าไปเรื่อย ๆ จึงเหลือค่าล่าสุดของแต่ละบ้าน
+    for (const reading of readings) {
+      const digits = Number(reading.meter_digits);
+      if (!Number.isInteger(digits) || digits <= 0) continue;
+      result.set(reading.members_id, digits);
+    }
+
+    return result;
+  }
+
   /** การจดมิเตอร์ทั้งหมดของหลายบ้าน — ใช้เรียนรู้พิกัดและหาเลขตั้งต้น */
   async readingsOfMembers(memberIds: number[]): Promise<MeterReadingEntity[]> {
     if (memberIds.length === 0) return [];
@@ -525,6 +547,70 @@ export class BillsService {
     }
   }
 
+  /** ย้อนดูการจดกี่ครั้งล่าสุดเพื่อหาจำนวนหลักอ้างอิง (ราวหนึ่งปี เผื่อเดือนที่กรอกมือปนอยู่) */
+  private static readonly DIGIT_LOOKBACK_READINGS = 12;
+
+  /**
+   * จำนวนหลักที่บ้านหลังนี้อ่านได้ล่าสุด — null = ยังไม่เคยจดผ่าน OCR เลย
+   *
+   * ต้องตัดการจดของเดือนที่กำลังจะจดทับออกด้วย ไม่งั้นตอนกด "จดทับ" จะไปเทียบกับ
+   * ค่าที่ OCR อ่านผิดของรอบก่อน แล้วบล็อกการแก้ให้ถูก ซึ่งกลับหัวกลับหางกับที่ต้องการ
+   */
+  private async latestMeterDigits(
+    membersId: number,
+    excludeReadingId?: number,
+  ): Promise<number | null> {
+    const readings = await this.meterReadingRepository.find({
+      where: { members_id: membersId },
+      order: { reading_date: 'DESC', id: 'DESC' },
+      take: BillsService.DIGIT_LOOKBACK_READINGS,
+    });
+
+    for (const reading of readings) {
+      if (reading.id === excludeReadingId) continue;
+      const digits = Number(reading.meter_digits);
+      if (Number.isInteger(digits) && digits > 0) return digits;
+    }
+    return null;
+  }
+
+  /**
+   * กัน OCR อ่านหลักหาย/หลักเกิน — ความผิดพลาดที่ทำให้ยอดคลาด 10 เท่าในครั้งเดียว
+   *
+   * ด่านหน่วยน้ำพุ่ง (assertUsageLooksSane) จับเคสนี้ได้ไม่ครบ:
+   *   - บ้านใหม่ที่ยังไม่มีประวัติใช้เพดาน 1,000 หน่วย ซึ่งหลวมพอให้เลขเกินมาหนึ่งหลักลอดไปได้
+   *   - บ้านที่ปกติใช้เยอะอยู่แล้ว เพดาน "เฉลี่ย × 5" ก็สูงตามไปด้วย
+   *
+   * ด่านนี้ไม่พึ่งประวัติการใช้น้ำเลย เทียบแค่ว่าหน้าปัดมีกี่หลัก ซึ่งเป็นค่าคงที่
+   * ของมิเตอร์ตัวนั้นตลอดอายุการใช้งาน จึงจับได้ตั้งแต่บิลใบที่สองเป็นต้นไป
+   *
+   * เปิดทางออกด้วย confirm_digit_change แนวเดียวกับด่านอื่น เพราะเปลี่ยนมิเตอร์
+   * เป็นรุ่นที่หลักไม่เท่าเดิมก็เกิดขึ้นได้จริง — บล็อกตายจะทำให้บ้านนั้นออกบิลไม่ได้อีกเลย
+   */
+  private assertDigitsLookSane(params: {
+    current_unit: number;
+    meter_digits?: number;
+    known_digits: number | null;
+    confirm_digit_change?: boolean;
+  }): number | null {
+    const digits = Number(params.meter_digits);
+    // ไม่ได้ส่งมา = กรอกเลขเอง ไม่ได้ผ่าน OCR จึงไม่มีอะไรให้ตรวจ
+    if (!Number.isInteger(digits) || digits <= 0) return null;
+
+    if (
+      params.confirm_digit_change ||
+      params.known_digits === null ||
+      digits === params.known_digits
+    ) {
+      return digits;
+    }
+
+    const direction = digits < params.known_digits ? 'หาย' : 'เกิน';
+    throw new ConflictException(
+      `หน้าปัดมิเตอร์ของบ้านหลังนี้เคยอ่านได้ ${params.known_digits} หลัก แต่รอบนี้อ่านได้ ${digits} หลัก (เลขที่อ่านได้คือ ${params.current_unit.toLocaleString('th-TH')}) — มิเตอร์ตัวเดิมมีจำนวนหลักคงที่เสมอ กรณีแบบนี้ส่วนใหญ่เกิดจากระบบอ่านหลัก${direction} กรุณาเทียบกับรูปหน้าปัดอีกครั้งครับ ถ้าเลขถูกต้องแล้ว (เช่นเพิ่งเปลี่ยนมิเตอร์เป็นรุ่นที่จำนวนหลักไม่เท่าเดิม) ให้กดยืนยันครับ`,
+    );
+  }
+
   /**
    * หน่วยน้ำที่ใช้ไป — รองรับกรณีมิเตอร์เริ่มนับใหม่
    *
@@ -593,7 +679,9 @@ export class BillsService {
     replace?: boolean;
     confirm_high_usage?: boolean;
     confirm_meter_reset?: boolean;
+    confirm_digit_change?: boolean;
     old_meter_final_unit?: number;
+    meter_digits?: number;
     excludeReadingId?: number;
   }) {
     // ตรวจเดือน/ปีก่อนทุกอย่าง — คิวรีหาบิลซ้ำและการเทียบลำดับเดือนข้างล่างพึ่งค่านี้ทั้งหมด
@@ -654,6 +742,18 @@ export class BillsService {
       );
     }
 
+    // จำนวนหลักผิด = เลขผิดตั้งแต่ต้น ตรวจก่อนเอาไปคำนวณอะไรทั้งสิ้น
+    // ตัดการจดของเดือนที่กำลังจะทับออก ไม่งั้นจะไปเทียบกับค่าที่อ่านผิดของรอบก่อน
+    const meter_digits = this.assertDigitsLookSane({
+      current_unit: params.current_unit,
+      meter_digits: params.meter_digits,
+      known_digits: await this.latestMeterDigits(
+        params.membersId,
+        existing?.meter_readings_id ?? params.excludeReadingId,
+      ),
+      confirm_digit_change: params.confirm_digit_change,
+    });
+
     const baseline = await this.getPreviousUnit(
       params.membersId,
       billing_month,
@@ -681,6 +781,8 @@ export class BillsService {
       previous_unit,
       usage_unit,
       meter_reset,
+      // ตรวจแล้วว่าเป็นจำนวนเต็มบวก (หรือ null เมื่อกรอกมือ) ลงคอลัมน์ tinyint ได้เลย
+      meter_digits,
       // ผู้เรียกต้องบันทึกสองค่านี้ ไม่ใช่ค่าดิบจาก dto
       billing_month,
       billing_year,
@@ -759,7 +861,9 @@ export class BillsService {
       replace: dto.replace,
       confirm_high_usage: dto.confirm_high_usage,
       confirm_meter_reset: dto.confirm_meter_reset,
+      confirm_digit_change: dto.confirm_digit_change,
       old_meter_final_unit: dto.old_meter_final_unit,
+      meter_digits: dto.meter_digits,
     });
 
     // ตรวจพิกัดก่อนเขียนไฟล์รูป — ตกด่านนี้แล้วจะได้ไม่มีไฟล์ค้างให้ต้องตามลบ
@@ -812,6 +916,8 @@ export class BillsService {
               members_id: dto.members_id,
               create_by: dto.create_by,
               create_date: now,
+              // ตรวจแล้วใน prepareBill() — null เมื่อกรอกเลขเอง ไม่ได้ผ่าน OCR
+              meter_digits: prep.meter_digits,
               // รูปผูกกับ "การจดครั้งนี้" ไม่ใช่กับบิล เพราะบิลออกใหม่ทับได้
               // แต่การจดคือเหตุการณ์ที่เกิดครั้งเดียวและรูปเป็นหลักฐานของเหตุการณ์นั้น
               ...(photoPath ? { evidence_photo: photoPath } : {}),

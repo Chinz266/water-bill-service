@@ -61,6 +61,33 @@ const baselineOf = (
 const fakeFile = (name = 'meter.jpg') =>
   ({ originalname: name, buffer: Buffer.from('x') }) as Express.Multer.File;
 
+/**
+ * ผลที่ vision service คืนมาสำหรับรูปหนึ่งใบ
+ * meter_digits นับจาก string ดิบ (ศูนย์นำหน้านับด้วย) เหมือนของจริง
+ */
+const ocrResult = (integer_part: string | null, full_reading?: string) =>
+  integer_part === null
+    ? {
+        success: false,
+        read_unit: null,
+        integer_part: null,
+        decimal_part: null,
+        full_reading: null,
+        meter_digits: null,
+        confidence: 0,
+        message: 'ไม่พบตัวเลขมิเตอร์',
+      }
+    : {
+        success: true,
+        read_unit: full_reading ?? integer_part,
+        integer_part,
+        decimal_part: null,
+        full_reading: full_reading ?? integer_part,
+        meter_digits: integer_part.replace(/\D/g, '').length,
+        confidence: 0.93,
+        message: 'สกัดค่าตัวเลขสำเร็จ',
+      };
+
 const dto: ScanBatchDto = { billing_month: '08', billing_year: '2026' };
 
 describe('ScanBatchService — จับคู่รูปกับบ้านจากเลขมิเตอร์', () => {
@@ -71,32 +98,24 @@ describe('ScanBatchService — จับคู่รูปกับบ้าน�
     previousUnitsForMembers: jest.Mock;
     readingsOfMembers: jest.Mock;
     learnedMeterLocations: jest.Mock;
+    knownMeterDigits: jest.Mock;
   };
   let photoMetadataService: { read: jest.Mock };
 
   /** ตั้งค่าให้ OCR อ่านได้เลขที่กำหนด (integer_part คือค่าที่ใช้จับคู่) */
   const ocrReturns = (integer_part: string | null, full_reading?: string) => {
     meterReadingsService.extractMeterUnit.mockResolvedValue(
-      integer_part === null
-        ? {
-            success: false,
-            read_unit: null,
-            integer_part: null,
-            decimal_part: null,
-            full_reading: null,
-            confidence: 0,
-            message: 'ไม่พบตัวเลขมิเตอร์',
-          }
-        : {
-            success: true,
-            read_unit: full_reading ?? integer_part,
-            integer_part,
-            decimal_part: null,
-            full_reading: full_reading ?? integer_part,
-            confidence: 0.93,
-            message: 'สกัดค่าตัวเลขสำเร็จ',
-          },
+      ocrResult(integer_part, full_reading),
     );
+  };
+
+  /** ให้แต่ละใบในชุดอ่านได้คนละเลข ตามลำดับที่ส่งไฟล์เข้าไป */
+  const ocrSequence = (...integerParts: string[]) => {
+    for (const part of integerParts) {
+      meterReadingsService.extractMeterUnit.mockResolvedValueOnce(
+        ocrResult(part),
+      );
+    }
   };
 
   beforeEach(() => {
@@ -107,6 +126,8 @@ describe('ScanBatchService — จับคู่รูปกับบ้าน�
       readingsOfMembers: jest.fn().mockResolvedValue([]),
       // ค่าเริ่มต้น = ยังไม่มีพิกัดที่เรียนรู้ไว้ ต้องถอยไปใช้หมุดในทะเบียนแทน
       learnedMeterLocations: jest.fn().mockReturnValue(new Map()),
+      // ค่าเริ่มต้น = ยังไม่รู้ว่าหน้าปัดของบ้านไหนมีกี่หลัก
+      knownMeterDigits: jest.fn().mockReturnValue(new Map()),
     };
     // ค่าเริ่มต้น = รูปไม่มี EXIF ซึ่งเป็นสภาพของรูปที่ผ่าน canvas ของหน้าเว็บมา
     photoMetadataService = { read: jest.fn().mockReturnValue(NO_EXIF) };
@@ -435,6 +456,160 @@ describe('ScanBatchService — จับคู่รูปกับบ้าน�
     });
   });
 
+  /**
+   * analyzeOne() มองทีละใบ จึงไม่รู้ว่าใบอื่นเสนอบ้านอะไรไปแล้ว
+   * ถ้าไม่ตรวจข้ามใบ รูป 5 ใบจะถูกเสนอให้บ้านหลังเดียวกันแบบ high ทั้งหมด
+   * แล้วไปแตกตอนกดยืนยันทีละใบ (ใบแรกผ่าน ที่เหลือโดน 409 บิลซ้ำ)
+   */
+  describe('รูปหลายใบในชุดเดียวชี้บ้านเดียวกัน', () => {
+    beforeEach(() => {
+      billsService.previousUnitsForMembers.mockResolvedValue(
+        baselineOf({
+          1: { previous_unit: 1250, usage_history: [9, 8, 10] },
+          2: { previous_unit: 3891, usage_history: [15] },
+          3: { previous_unit: 782, usage_history: [5] },
+        }),
+      );
+      // ทุกใบอ่านได้เลขเดียวกัน → ชี้ไปบ้าน 12/3 หมด
+      ocrReturns('1258');
+    });
+
+    it('ลดทุกใบเป็น ambiguous และไม่เสนอบ้านให้ใบไหนเลย', async () => {
+      const res = await service.analyze(
+        [fakeFile('a.jpg'), fakeFile('b.jpg'), fakeFile('c.jpg')],
+        dto,
+      );
+
+      expect(res.results.map((r) => r.confidence)).toEqual([
+        'ambiguous',
+        'ambiguous',
+        'ambiguous',
+      ]);
+      expect(res.results.every((r) => r.suggestion === null)).toBe(true);
+      expect(res.summary.high).toBe(0);
+      expect(res.summary.conflicts).toBe(3);
+    });
+
+    it('บอกว่าใบไหนชนกับใบไหน (reason นับจาก 1 ให้ตรงกับที่คนเห็นบนจอ)', async () => {
+      const res = await service.analyze(
+        [fakeFile('a.jpg'), fakeFile('b.jpg'), fakeFile('c.jpg')],
+        dto,
+      );
+
+      expect(res.results[0].conflicts_with).toEqual([1, 2]);
+      expect(res.results[1].conflicts_with).toEqual([0, 2]);
+      expect(res.results[0].reason).toMatch(
+        /รูปที่ 1, 2, 3 ถูกเสนอให้บ้าน 12\/3/,
+      );
+    });
+
+    it('ยังคืนตัวเลือกไว้ให้คนเลือกเอง ไม่ใช่ตัดทิ้งทั้งใบ', async () => {
+      const res = await service.analyze([fakeFile(), fakeFile()], dto);
+
+      expect(res.results[0].candidates.length).toBeGreaterThan(0);
+      expect(res.results[0].candidates[0].house_no).toBe('12/3');
+    });
+
+    it('ใบที่ชี้คนละบ้านไม่โดนลดชั้นไปด้วย', async () => {
+      ocrSequence('1258', '1258', '3905');
+
+      const res = await service.analyze(
+        [fakeFile('a.jpg'), fakeFile('b.jpg'), fakeFile('c.jpg')],
+        dto,
+      );
+
+      expect(res.results[2].confidence).toBe('high');
+      expect(res.results[2].suggestion?.house_no).toBe('45');
+      expect(res.results[2].conflicts_with).toEqual([]);
+      expect(res.summary.conflicts).toBe(2);
+    });
+  });
+
+  describe('บ้านที่ออกบิลเดือนนี้ไปแล้ว', () => {
+    it('ถูกลดคะแนน จึงไม่ชนะบ้านที่ยังไม่มีบิลซึ่งเข้าเค้าพอ ๆ กัน', async () => {
+      billsService.previousUnitsForMembers.mockResolvedValue(
+        baselineOf({
+          1: {
+            previous_unit: 1250,
+            usage_history: [10, 10, 10],
+            already_billed: true,
+          },
+          2: { previous_unit: 1248, usage_history: [10, 10, 10] },
+          3: { previous_unit: 9999, usage_history: [10] },
+        }),
+      );
+      ocrReturns('1260');
+
+      const res = await service.analyze([fakeFile()], dto);
+
+      // บ้าน 12/3 ใช้พอดี 10 หน่วยตามค่าเฉลี่ย (คะแนนดิบสูงกว่า) แต่ออกบิลไปแล้ว
+      // จึงต้องแพ้บ้าน 45 ที่ใช้ 12 หน่วยและยังไม่มีบิล
+      expect(res.results[0].suggestion?.house_no).toBe('45');
+    });
+
+    it('ยังเป็นตัวเลือกอยู่ (จดผิดแล้วมาแก้เป็นเรื่องปกติ) แต่ติดคำเตือนไว้', async () => {
+      memberRepository.find.mockResolvedValue([member(1, '12/3')]);
+      billsService.previousUnitsForMembers.mockResolvedValue(
+        baselineOf({
+          1: {
+            previous_unit: 1250,
+            usage_history: [9, 8, 10],
+            already_billed: true,
+          },
+        }),
+      );
+      ocrReturns('1258');
+
+      const res = await service.analyze([fakeFile()], dto);
+
+      expect(res.results[0].suggestion?.house_no).toBe('12/3');
+      expect(res.results[0].warnings).toEqual([
+        expect.stringMatching(/ออกบิลเดือน 08\/2026 ไปแล้ว/),
+      ]);
+    });
+  });
+
+  describe('จำนวนหลักบนหน้าปัด', () => {
+    beforeEach(() => {
+      memberRepository.find.mockResolvedValue([member(1, '12/3')]);
+      billsService.previousUnitsForMembers.mockResolvedValue(
+        baselineOf({ 1: { previous_unit: 1250, usage_history: [9, 8, 10] } }),
+      );
+    });
+
+    it('เตือนเมื่อจำนวนหลักไม่ตรงกับที่บ้านหลังนี้เคยอ่านได้', async () => {
+      billsService.knownMeterDigits.mockReturnValue(new Map([[1, 5]]));
+      ocrReturns('1258'); // 4 หลัก ทั้งที่หน้าปัดบ้านนี้มี 5
+
+      const res = await service.analyze([fakeFile()], dto);
+
+      expect(res.results[0].reading.meter_digits).toBe(4);
+      expect(res.results[0].warnings).toEqual([
+        expect.stringMatching(/เคยอ่านได้ 5 หลัก แต่รูปนี้อ่านได้ 4 หลัก/),
+      ]);
+    });
+
+    it('จำนวนหลักตรงกัน → ไม่เตือน', async () => {
+      billsService.knownMeterDigits.mockReturnValue(new Map([[1, 4]]));
+      ocrReturns('1258');
+
+      const res = await service.analyze([fakeFile()], dto);
+
+      expect(res.results[0].warnings).toHaveLength(0);
+    });
+
+    it('ศูนย์นำหน้านับเป็นหลักด้วย (00025 = 5 หลัก ไม่ใช่ 2)', async () => {
+      billsService.knownMeterDigits.mockReturnValue(new Map([[1, 5]]));
+      ocrReturns('01258');
+
+      const res = await service.analyze([fakeFile()], dto);
+
+      expect(res.results[0].reading.meter_digits).toBe(5);
+      expect(res.results[0].reading.meter_unit).toBe(1258);
+      expect(res.results[0].warnings).toHaveLength(0);
+    });
+  });
+
   describe('ด่านกันการใช้งานผิด', () => {
     it('ไม่แนบรูปเลย → 400', async () => {
       await expect(service.analyze([], dto)).rejects.toThrow(
@@ -466,7 +641,8 @@ describe('ScanBatchService — จับคู่รูปกับบ้าน�
         3: { previous_unit: 782, usage_history: [5] },
       }),
     );
-    ocrReturns('1258');
+    // คนละบ้านกัน ไม่งั้นจะเข้าเงื่อนไข "ชี้บ้านซ้ำ" แล้วถูกลดเป็น ambiguous ทั้งคู่
+    ocrSequence('1258', '3905');
 
     const res = await service.analyze(
       [fakeFile('a.jpg'), fakeFile('b.jpg')],
@@ -475,6 +651,7 @@ describe('ScanBatchService — จับคู่รูปกับบ้าน�
 
     expect(res.total).toBe(2);
     expect(res.summary.high).toBe(2);
+    expect(res.summary.conflicts).toBe(0);
     expect(res.results.map((r) => r.filename)).toEqual(['a.jpg', 'b.jpg']);
   });
 });

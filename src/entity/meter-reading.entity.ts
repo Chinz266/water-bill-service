@@ -32,6 +32,13 @@ export class MeterReadingEntity {
   @Column({ type: 'datetime', nullable: true })
   captured_at!: Date | null;
 
+  // 🌟 จำนวนหลักบนหน้าปัดที่ YOLO ตรวจเจอ — นับเลขศูนย์นำหน้าด้วย (00025 = 5 ไม่ใช่ 2)
+  //    มิเตอร์ตัวเดิมมีจำนวนหลักคงที่เสมอ ค่าที่เปลี่ยนไปจึงแปลว่า OCR อ่านหลักหาย/เกิน
+  //    ซึ่งเป็นความผิดพลาดที่ทำให้ยอดเงินคลาด 10 เท่าขึ้นไป (ดู db/migrate-meter-digits.sql)
+  //    NULL = การจดครั้งนั้นกรอกมือ ไม่ได้ผ่าน OCR — ต้องข้ามตอนหาค่าอ้างอิง ไม่ใช่นับเป็น 0
+  @Column({ type: 'tinyint', nullable: true })
+  meter_digits!: number | null;
+
   // 🌟 ชื่อคอลัมน์จริงใน DB คือ members_id1 (มี 1 ต่อท้าย)
   @Column({ name: 'members_id1' })
   members_id!: number; // ID ของลูกบ้าน

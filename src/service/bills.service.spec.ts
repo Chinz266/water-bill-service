@@ -96,15 +96,19 @@ describe('BillsService — ด่านตรวจก่อนออกบิ�
     );
   });
 
-  /** ให้ผ่านด่านเรทค่าน้ำได้ แล้วตั้งเลขมิเตอร์ตั้งต้นของบ้านหลังนี้ */
-  const givenBaseline = (previousUnit: number) => {
+  /**
+   * ให้ผ่านด่านเรทค่าน้ำได้ แล้วตั้งเลขมิเตอร์ตั้งต้นของบ้านหลังนี้
+   *
+   * meterDigits = จำนวนหลักที่บ้านหลังนี้เคยอ่านได้ (ไม่ส่ง = ยังไม่เคยจดผ่าน OCR)
+   */
+  const givenBaseline = (previousUnit: number, meterDigits?: number) => {
     waterRateRepository.findOne.mockResolvedValue({
       id: 1,
       price_per_unit: '15.00',
     });
     // ไม่มีบิลเก่า → เลขตั้งต้นมาจากการจดตอนลงทะเบียน
     meterReadingRepository.find.mockResolvedValue([
-      { id: 1, meter_unit: previousUnit },
+      { id: 1, meter_unit: previousUnit, meter_digits: meterDigits ?? null },
     ]);
   };
 
@@ -333,6 +337,75 @@ describe('BillsService — ด่านตรวจก่อนออกบิ�
 
       expect(bill.billing_month).toBe('08');
       expect(bill.billing_year).toBe('2026');
+    });
+  });
+
+  /**
+   * มิเตอร์ตัวเดิมมีจำนวนหลักคงที่ตลอดอายุการใช้งาน จำนวนหลักที่เปลี่ยนไป
+   * จึงเป็นสัญญาณของ OCR อ่านผิด ไม่ใช่ความคลาดเคลื่อนที่ยอมรับได้
+   */
+  describe('จำนวนหลักบนหน้าปัด', () => {
+    it('อ่านได้น้อยกว่าที่เคย → บล็อกและบอกว่าน่าจะอ่านหลักหาย', async () => {
+      givenBaseline(1250, 5);
+
+      await expect(
+        service.createFromScan(dto({ current_unit: 1258, meter_digits: 4 })),
+      ).rejects.toThrow(ConflictException);
+      await expect(
+        service.createFromScan(dto({ current_unit: 1258, meter_digits: 4 })),
+      ).rejects.toThrow(/อ่านหลักหาย/);
+    });
+
+    it('อ่านได้มากกว่าที่เคย → บล็อกและบอกว่าน่าจะอ่านหลักเกิน', async () => {
+      givenBaseline(1250, 4);
+
+      await expect(
+        service.createFromScan(dto({ current_unit: 1258, meter_digits: 5 })),
+      ).rejects.toThrow(/อ่านหลักเกิน/);
+    });
+
+    it('จับเคสที่ด่านหน่วยน้ำปล่อยผ่าน (บ้านยังไม่มีบิล เพดาน 1,000 หน่วยหลวมเกิน)', async () => {
+      givenBaseline(1250, 5);
+
+      // ใช้ไป 950 หน่วย — ต่ำกว่าเพดานของบ้านที่ยังไม่มีประวัติ ด่านหน่วยน้ำจึงปล่อยผ่าน
+      await expect(
+        service.createFromScan(dto({ current_unit: 2200 })),
+      ).resolves.toBeDefined();
+
+      // เลขเดียวกันเป๊ะ แต่บอกว่า OCR เห็น 4 หลัก ทั้งที่หน้าปัดบ้านนี้มี 5 → ต้องถูกบล็อก
+      await expect(
+        service.createFromScan(dto({ current_unit: 2200, meter_digits: 4 })),
+      ).rejects.toThrow(/อ่านหลักหาย/);
+    });
+
+    it('ยืนยันแล้วผ่าน (เปลี่ยนมิเตอร์เป็นรุ่นที่หลักไม่เท่าเดิม)', async () => {
+      givenBaseline(1250, 5);
+
+      await expect(
+        service.createFromScan(
+          dto({
+            current_unit: 1258,
+            meter_digits: 4,
+            confirm_digit_change: true,
+          }),
+        ),
+      ).resolves.toBeDefined();
+    });
+
+    it('บ้านที่ยังไม่เคยจดผ่าน OCR → ไม่มีอะไรให้เทียบ ปล่อยผ่าน', async () => {
+      givenBaseline(1250);
+
+      await expect(
+        service.createFromScan(dto({ current_unit: 1258, meter_digits: 5 })),
+      ).resolves.toBeDefined();
+    });
+
+    it('กรอกเลขเองโดยไม่ผ่าน OCR → ข้ามด่านนี้ ไม่บล็อกการทำงานปกติ', async () => {
+      givenBaseline(1250, 5);
+
+      await expect(
+        service.createFromScan(dto({ current_unit: 1258 })),
+      ).resolves.toBeDefined();
     });
   });
 

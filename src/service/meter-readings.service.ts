@@ -80,6 +80,21 @@ export class MeterReadingsService {
   // ==========================================
   // --- ส่วนฟังก์ชัน OCR (เรียกโมเดล YOLO best.pt ผ่าน Python service) ---
   // ==========================================
+
+  /**
+   * จำนวนหลักที่โมเดลเห็นบนหน้าปัด — นับจาก string ดิบเท่านั้น
+   *
+   * ห้ามนับจากตัวเลขที่แปลงแล้ว เพราะ Number('00025') = 25 ซึ่งเหลือ 2 หลัก
+   * ทั้งที่หน้าปัดมี 5 หลัก ค่าที่ได้จะเปลี่ยนไปมาตามเลขที่มิเตอร์เดินไปถึง
+   * แล้วใช้เทียบกับเดือนก่อนไม่ได้เลย
+   *
+   * คืน null เมื่อไม่มีตัวเลขให้นับ — ผู้เรียกต้องถือว่า "ไม่รู้" ไม่ใช่ "0 หลัก"
+   */
+  private countDigits(raw: string | null | undefined): number | null {
+    const digits = (raw ?? '').replace(/\D/g, '');
+    return digits.length > 0 ? digits.length : null;
+  }
+
   async extractMeterUnit(imageBuffer: Buffer) {
     const startTime = Date.now();
     this.logger.log('Starting water meter reading via YOLO vision service...');
@@ -134,6 +149,9 @@ export class MeterReadingsService {
           integer_part: data.integer_part ?? data.read_unit,
           decimal_part: data.decimal_part,
           full_reading: data.full_reading,
+          // จำนวนหลักบนหน้าปัด นับจาก string ก่อนแปลงเป็นตัวเลข ไม่งั้นศูนย์นำหน้าหายไป
+          // ใช้เทียบกับครั้งก่อนของบ้านเดียวกัน เพื่อจับเคส OCR อ่านหลักหาย/หลักเกิน
+          meter_digits: this.countDigits(data.integer_part ?? data.read_unit),
           // ส่ง confidence ต่อให้หน้าเว็บด้วย เอาไว้ทำแถบบอกว่าอ่านได้ชัดแค่ไหน
           confidence: data.confidence,
           photo_taken,
@@ -151,6 +169,7 @@ export class MeterReadingsService {
         integer_part: null,
         decimal_part: null,
         full_reading: null,
+        meter_digits: null,
         confidence: 0,
         photo_taken,
         message:

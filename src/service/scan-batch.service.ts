@@ -37,6 +37,11 @@ export interface ScanBatchItem {
     meter_unit: number | null;
     confidence: number;
     full_reading?: string | null;
+    /**
+     * จำนวนหลักที่โมเดลเห็นบนหน้าปัด
+     * หน้าเว็บต้องส่งค่านี้ต่อไปกับ POST /bills/scan ไม่งั้นด่านจำนวนหลักจะไม่ทำงาน
+     */
+    meter_digits?: number | null;
   };
   /** วันเวลา + พิกัดที่อ่านได้จาก EXIF ของไฟล์รูป */
   photo_taken: PhotoMetadata;
@@ -44,6 +49,14 @@ export interface ScanBatchItem {
   reason: string;
   /** คำเตือนที่ไม่ถึงขั้นบล็อก เช่น วันถ่ายไม่ตรงเดือนบิล หรือถ่ายไกลจากบ้าน */
   warnings: string[];
+  /**
+   * index ของรูปใบอื่นในชุดเดียวกันที่ระบบเสนอให้บ้านหลังเดียวกัน
+   *
+   * ไม่ว่างเมื่อไหร่แปลว่าชุดนี้มีรูปชี้ซ้ำบ้าน และทุกใบในกลุ่มถูกลดเป็น ambiguous แล้ว
+   * (เป็น index ชุดเดียวกับ field `index` คือเริ่มที่ 0 ส่วนข้อความใน reason นับจาก 1
+   * ให้ตรงกับลำดับที่คนเห็นบนจอ)
+   */
+  conflicts_with: number[];
   /** บ้านที่ระบบเสนอ — null เมื่อแยกไม่ออกหรืออ่านเลขไม่ได้ */
   suggestion: Candidate | null;
   candidates: Candidate[];
@@ -86,6 +99,18 @@ export class ScanBatchService {
   /** ไกลเกินนี้ถือว่าน่าสงสัย — บ้านในหมู่บ้านห่างกันแค่ 8-20 ม. */
   static readonly GPS_FAR_M = 150;
 
+  /**
+   * ตัวคูณลดคะแนนของบ้านที่มีบิลเดือนนี้ไปแล้ว
+   *
+   * ไม่ตัดทิ้งเลย เพราะการจดทับของเดิมเป็นสิ่งที่ทำได้จริง (จดผิดแล้วมาแก้)
+   * แต่ต้องไม่ชนะบ้านที่ยังไม่มีบิลซึ่งคะแนนพอ ๆ กัน ไม่งั้นรูปของบ้านที่ยังไม่ได้
+   * ออกบิลจะถูกเสนอให้ไปทับใบของบ้านข้าง ๆ ที่ออกไปแล้ว
+   *
+   * 0.3 เลือกให้สัมพันธ์กับเกณฑ์ใน judge() — บ้านที่ออกบิลแล้วต้องมีคะแนนดิบ
+   * มากกว่าคู่แข่งราว 6 เท่าถึงจะยังนำอยู่หลังโดนลด (judge ใช้ "นำเกิน 2 เท่า")
+   */
+  static readonly ALREADY_BILLED_PENALTY = 0.3;
+
   constructor(
     @InjectRepository(MemberEntity)
     private readonly memberRepository: Repository<MemberEntity>,
@@ -123,19 +148,32 @@ export class ScanBatchService {
       dto.billing_year,
     );
 
+    // โหลดการจดทั้งหมดครั้งเดียว ใช้ทั้งเรียนรู้พิกัดและหาจำนวนหลักอ้างอิง
+    const readings = await this.billsService.readingsOfMembers(memberIds);
     // พิกัดที่เรียนรู้จากจุดที่เคยไปยืนถ่ายจริง — แม่นกว่าหมุดในทะเบียนมาก
-    const learned = this.billsService.learnedMeterLocations(
-      await this.billsService.readingsOfMembers(memberIds),
-    );
+    const learned = this.billsService.learnedMeterLocations(readings);
+    // จำนวนหลักบนหน้าปัดของแต่ละบ้าน — ใช้เตือนเมื่อ OCR อ่านหลักหาย/เกิน
+    const knownDigits = this.billsService.knownMeterDigits(readings);
 
     // OCR ทีละใบตามลำดับ ไม่ยิงขนานเพราะ vision service โหลดโมเดลตัวเดียว
     // ยิงพร้อมกัน 30 ใบมีแต่จะแย่ง GPU/CPU กันเองแล้วช้ากว่าเดิม
     const results: ScanBatchItem[] = [];
     for (const [index, file] of files.entries()) {
       results.push(
-        await this.analyzeOne(file, index, members, baseline, learned, dto),
+        await this.analyzeOne(
+          file,
+          index,
+          members,
+          baseline,
+          learned,
+          knownDigits,
+          dto,
+        ),
       );
     }
+
+    // ต้องทำหลังครบทุกใบ — เป็นข้อสรุปที่มองใบเดียวแล้วเห็นไม่ได้
+    this.flagDuplicateSuggestions(results);
 
     const counted = (level: MatchConfidence) =>
       results.filter((r) => r.confidence === level).length;
@@ -149,9 +187,59 @@ export class ScanBatchService {
         medium: counted('medium'),
         ambiguous: counted('ambiguous'),
         none: counted('none'),
+        /** จำนวนใบที่ถูกลดชั้นเพราะไปชี้บ้านซ้ำกับใบอื่น */
+        conflicts: results.filter((r) => r.conflicts_with.length > 0).length,
       },
       results,
     };
+  }
+
+  /**
+   * รูปหลายใบในชุดเดียวกันที่ชี้ไปบ้านหลังเดียวกัน = อย่างน้อยหนึ่งใบต้องผิด
+   *
+   * ═══ ทำไมต้องตรวจข้ามใบ ═══
+   *
+   * analyzeOne() มองทีละใบ จึงไม่มีทางรู้ว่าใบอื่นเสนอบ้านอะไรไปแล้ว ผลคือรูป 5 ใบ
+   * ที่เลขมิเตอร์ใกล้กันจะถูกเสนอให้บ้านหลังเดียวกันทั้งหมดอย่างมั่นใจ (high ทุกใบ)
+   * โดยระบบไม่รู้ตัว แล้วไปแตกตอนกดยืนยันทีละใบ — ใบแรกออกบิลผ่าน ที่เหลือโดน 409
+   * บิลซ้ำทีละใบ เสียเวลาคนกด 5 รอบกว่าจะรู้ว่าการจับคู่ผิดตั้งแต่ต้น
+   * และถ้าเผลอกด "จดทับ" ไปเรื่อย ๆ จะเหลือบิลใบเดียว ส่วนอีก 4 บ้านไม่มีบิล
+   *
+   * ═══ ทำไมลดทุกใบ ไม่เลือกใบที่คะแนนดีที่สุดไว้ ═══
+   *
+   * เพราะไม่มีข้อมูลพอจะรู้ว่าใบไหนถูก — คะแนนที่สูงกว่าเล็กน้อยไม่ได้แปลว่าใบนั้น
+   * เป็นของบ้านหลังนี้จริง อาจเป็นรูปเดียวกันถ่ายซ้ำ หรือ OCR อ่านผิดทั้งกอง
+   * การเลือกใบที่คะแนนสูงสุดไว้คือการเดาที่ดูน่าเชื่อถือ ซึ่งอันตรายกว่าการบอกว่าไม่รู้
+   * (แนวเดียวกับ gpsTiebreak ที่ยอมคืน null เมื่อข้อมูลไม่พอ)
+   */
+  private flagDuplicateSuggestions(results: ScanBatchItem[]): void {
+    const byMember = new Map<number, ScanBatchItem[]>();
+    for (const item of results) {
+      if (!item.suggestion) continue;
+      const group = byMember.get(item.suggestion.members_id);
+      if (group) group.push(item);
+      else byMember.set(item.suggestion.members_id, [item]);
+    }
+
+    for (const group of byMember.values()) {
+      if (group.length < 2) continue;
+
+      // เก็บชื่อบ้านก่อน เพราะข้างล่างจะล้าง suggestion ทิ้ง
+      const house_no = group[0].suggestion!.house_no;
+      const photoNumbers = group.map((item) => item.index + 1).join(', ');
+
+      for (const item of group) {
+        item.conflicts_with = group
+          .filter((other) => other !== item)
+          .map((other) => other.index);
+        item.confidence = 'ambiguous';
+        item.suggestion = null;
+        item.reason =
+          `รูปที่ ${photoNumbers} ถูกเสนอให้บ้าน ${house_no} เหมือนกันทั้งหมด ` +
+          `แต่ 1 บ้านมีบิลได้เดือนละใบเดียว จึงมีอย่างน้อยหนึ่งใบที่จับคู่ผิด — ` +
+          `กรุณาเลือกว่าใบไหนคือบ้าน ${house_no} ส่วนใบที่เหลือให้เลือกบ้านเองหรือถ่ายใหม่ครับ`;
+      }
+    }
   }
 
   /** อ่านรูปหนึ่งใบแล้วจัดอันดับว่าน่าจะเป็นของบ้านไหน */
@@ -161,6 +249,7 @@ export class ScanBatchService {
     members: MemberEntity[],
     baseline: Awaited<ReturnType<BillsService['previousUnitsForMembers']>>,
     learned: ReturnType<BillsService['learnedMeterLocations']>,
+    knownDigits: ReturnType<BillsService['knownMeterDigits']>,
     dto: ScanBatchDto,
   ): Promise<ScanBatchItem> {
     // อ่าน EXIF จาก buffer ต้นฉบับก่อนใคร — ต้องมาก่อน OCR ด้วย
@@ -191,7 +280,12 @@ export class ScanBatchService {
       return {
         index,
         filename: file.originalname,
-        reading: { success: false, meter_unit: null, confidence: 0 },
+        reading: {
+          success: false,
+          meter_unit: null,
+          confidence: 0,
+          meter_digits: null,
+        },
         photo_taken,
         confidence: 'none',
         reason:
@@ -199,6 +293,7 @@ export class ScanBatchService {
           reading?.message ??
           'อ่านเลขมิเตอร์จากรูปนี้ไม่ได้ กรุณาเลือกบ้านเอง',
         warnings,
+        conflicts_with: [],
         suggestion: null,
         candidates: [],
       };
@@ -228,6 +323,26 @@ export class ScanBatchService {
       );
     }
 
+    if (suggestion) {
+      // เตือนตั้งแต่ตรงนี้ ไม่ต้องรอให้ไปโดน 409 ตอนกดยืนยัน — คนจะได้ตัดสินใจ
+      // ตั้งแต่ยังเห็นรูปทั้งชุดอยู่ ว่าจะจดทับของเดิมหรือรูปใบนี้เป็นของบ้านอื่น
+      if (suggestion.already_billed) {
+        warnings.push(
+          `บ้าน ${suggestion.house_no} ออกบิลเดือน ${dto.billing_month}/${dto.billing_year} ไปแล้ว การยืนยันรูปนี้จะเป็นการจดทับของเดิม`,
+        );
+      }
+
+      // จำนวนหลักที่ไม่ตรงกับที่บ้านหลังนี้เคยอ่านได้ = สัญญาณว่า OCR อ่านหลักหาย/เกิน
+      // ซึ่งจะไปโดนบล็อกที่ BillsService ตอนกดยืนยันอยู่แล้ว บอกล่วงหน้าที่นี่ด้วย
+      const digits = reading?.meter_digits ?? null;
+      const expected = knownDigits.get(suggestion.members_id);
+      if (digits !== null && expected !== undefined && digits !== expected) {
+        warnings.push(
+          `หน้าปัดของบ้าน ${suggestion.house_no} เคยอ่านได้ ${expected} หลัก แต่รูปนี้อ่านได้ ${digits} หลัก กรุณาเทียบเลขกับรูปอีกครั้งครับ`,
+        );
+      }
+    }
+
     return {
       index,
       filename: file.originalname,
@@ -237,11 +352,13 @@ export class ScanBatchService {
         confidence: reading?.confidence ?? 0,
         // เก็บเลขดิบไว้ให้คนตรวจย้อนได้ว่าโมเดลเห็นทศนิยมด้วยไหม
         full_reading: reading?.full_reading ?? null,
+        meter_digits: reading?.meter_digits ?? null,
       },
       photo_taken,
       confidence,
       reason,
       warnings,
+      conflicts_with: [],
       suggestion,
       // ส่งไม่เกิน 5 อันดับพอ หน้าเว็บเอาไปทำ dropdown ให้คนเลือกเอง
       candidates: candidates.slice(0, 5),
@@ -308,8 +425,14 @@ export class ScanBatchService {
           ? history.reduce((sum, u) => sum + u, 0) / history.length
           : null;
 
-      const score = this.scoreUsage(usage_unit, average_usage);
-      if (score <= 0) continue; // เกินเพดานจนไม่สมเหตุสมผล
+      const rawScore = this.scoreUsage(usage_unit, average_usage);
+      if (rawScore <= 0) continue; // เกินเพดานจนไม่สมเหตุสมผล
+
+      // บ้านที่ออกบิลเดือนนี้ไปแล้วยังเป็นตัวเลือกได้ (จดผิดแล้วมาแก้เป็นเรื่องปกติ)
+      // แต่ต้องไม่ชนะบ้านที่ยังไม่มีบิลซึ่งคะแนนพอ ๆ กัน
+      const score = base.already_billed
+        ? rawScore * ScanBatchService.ALREADY_BILLED_PENALTY
+        : rawScore;
 
       candidates.push({
         members_id: member.id,
