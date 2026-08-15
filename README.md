@@ -37,13 +37,28 @@
 **2. Backend + Vision service** (คำสั่งเดียว รันทั้งคู่ผ่าน `concurrently`)
 
 ```powershell
-cd water-bill-service-master
+cd water-bill-service
 npm run start:dev
 ```
 
-`start:dev` จะสตาร์ท NestJS (`[api]`) พร้อม FastAPI (`[vision]`) โดยหา Python จาก `meter-vision-service/venv` ให้เอง
-ถ้ายังไม่ได้สร้าง venv มันจะข้าม vision service พร้อมพิมพ์วิธีติดตั้ง แล้วปล่อยให้ NestJS รันต่อตามปกติ
+`npm start` และ `npm run start:dev` สตาร์ท NestJS (`[api]`) พร้อม FastAPI (`[vision]`) เสมอ ต่างกันแค่ `start:dev` เปิด `--watch` ให้ด้วย
+ทั้งคู่มี `prestart` / `prestart:dev` เคลียร์พอร์ต 3000 กับ 8000 ให้ก่อนอัตโนมัติ
 (อยากรันแยกก็ยังทำได้: `npm run start:api` และ `npm run start:vision`)
+
+### venv ของ vision service ติดตั้งให้เอง
+
+`scripts/start-vision.ts` หา Python จาก `meter-vision-service/venv` (หรือ `.venv`) รองรับทั้ง Windows และ macOS/Linux
+**ถ้ายังไม่มี venv จะสร้างให้เองแล้ว `pip install -r requirements.txt` ต่อทันที** — ครั้งแรกใช้เวลานาน เพราะ `ultralytics` ลาก `torch` มาด้วยราว 2GB ครั้งต่อไปเจอ venv เดิมแล้วสตาร์ทเลย
+
+ถ้าติดตั้งไม่สำเร็จ (ไม่มี Python ในเครื่อง หรือ pip พัง) สคริปต์จะพิมพ์วิธีติดตั้งเองแล้วจบด้วย exit code 0 **โดยเจตนา** — เพราะ `concurrently` ตั้ง `--kill-others-on-fail` ไว้ ถ้าจบแบบ error NestJS ที่รันคู่กันจะถูกฆ่าตามไปด้วย ผลคือ backend รันต่อได้ปกติ เสียแค่หน้าสแกนมิเตอร์
+
+> ⚠️ `torch` ยังไม่มี wheel ให้ Python รุ่นใหม่สุดเสมอไป ถ้า pip ล้มตอน bootstrap ให้สร้าง venv ด้วย **Python 3.12** เอง:
+> ```powershell
+> cd meter-vision-service
+> py -3.12 -m venv venv
+> .\venv\Scripts\Activate.ps1
+> pip install -r requirements.txt
+> ```
 
 **3. หน้าเว็บ**
 
@@ -438,7 +453,7 @@ npm test
 
 **`EADDRINUSE: address already in use :::3000`** — `npm run start:dev` แตก process ลูกเป็น `node dist/main` (และ `python.exe` สำหรับ vision service) การกด Ctrl+C หรือปิด terminal บางครั้งฆ่าแค่ตัวแม่ ตัวลูกยังถือพอร์ตอยู่
 
-`prestart:dev` จะรัน `scripts/free-ports.ts` เคลียร์พอร์ต 3000 กับ 8000 ให้อัตโนมัติทุกครั้งก่อนสตาร์ท ปกติจึงไม่ควรเจอ error นี้ ถ้าอยากเคลียร์เองแยก ๆ ใช้ `npm run free-ports`
+`prestart` / `prestart:dev` จะรัน `scripts/free-ports.ts` เคลียร์พอร์ต 3000 กับ 8000 ให้อัตโนมัติทุกครั้งก่อนสตาร์ท (ทั้ง `npm start` และ `npm run start:dev`) ปกติจึงไม่ควรเจอ error นี้ ถ้าอยากเคลียร์เองแยก ๆ ใช้ `npm run free-ports`
 
 **`ไม่พบ JWT_SECRET ใน .env`** — แอปตั้งใจล้มตั้งแต่ตอน boot คัดลอก `.env.example` เป็น `.env` แล้วใส่ค่าสุ่มของตัวเอง
 
