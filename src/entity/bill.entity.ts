@@ -6,6 +6,14 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 
+/**
+ * สถานะการชำระเงิน — ตัวพิมพ์ต้องตรงกับ enum ใน Database ('Pending','Paid','Overdue')
+ * ประกาศไว้ที่เดียวเหมือน REPORT_STATUSES เพื่อให้ service เอาไปตรวจค่าที่ผู้ใช้ส่งมาได้
+ */
+export const PAYMENT_STATUSES = ['Pending', 'Paid', 'Overdue'] as const;
+
+export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
+
 @Entity('bills')
 export class BillEntity {
   @PrimaryGeneratedColumn()
@@ -36,13 +44,12 @@ export class BillEntity {
   billing_year!: string; // ประจำปี (เช่น '2026')
 
   // สมมติสถานะการจ่ายเงินมี 3 แบบ: รอจ่าย, จ่ายแล้ว, ค้างชำระ
-  // 🌟 ตัวพิมพ์ต้องตรงกับ enum ใน Database: ('Pending','Paid','Overdue')
   @Column({
     type: 'enum',
-    enum: ['Pending', 'Paid', 'Overdue'],
+    enum: [...PAYMENT_STATUSES],
     default: 'Pending',
   })
-  payment_status!: 'Pending' | 'Paid' | 'Overdue';
+  payment_status!: PaymentStatus;
 
   @Column({ length: 1000, nullable: true })
   pdf_path!: string; // Path สำหรับเก็บไฟล์ PDF บิลค่าน้ำ

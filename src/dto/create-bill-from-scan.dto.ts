@@ -30,6 +30,36 @@ export class CreateBillFromScanDto {
   @ApiPropertyOptional({ description: 'ID ของ Admin ผู้จด', example: 1 })
   create_by?: number;
 
+  // ── พิกัดของจุดที่ยืนถ่ายรูป ────────────────────────────────────────────
+  // ควรมาจาก navigator.geolocation.getCurrentPosition() ตอนกดชัตเตอร์
+  // ไม่ใช่จาก EXIF เพราะหน้าเว็บย่อรูปด้วย canvas ก่อนส่ง EXIF จึงหายไปแล้ว
+  // ข้อดีอีกอย่างคือ Geolocation API แถม accuracy มาให้ ซึ่ง EXIF ไม่มี
+
+  @ApiPropertyOptional({
+    description: 'ละติจูดของจุดที่ยืนถ่ายรูปมิเตอร์',
+    example: 14.9799,
+  })
+  latitude?: number;
+
+  @ApiPropertyOptional({
+    description: 'ลองจิจูดของจุดที่ยืนถ่ายรูปมิเตอร์',
+    example: 102.097771,
+  })
+  longitude?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'ความคลาดเคลื่อนของพิกัดเป็นเมตร (coords.accuracy) — เกิน 50 ม. ระบบจะไม่เอาไปใช้ตัดสิน',
+    example: 12,
+  })
+  gps_accuracy_m?: number;
+
+  @ApiPropertyOptional({
+    description: 'วันเวลาที่กดชัตเตอร์จริง (ISO 8601)',
+    example: '2026-08-14T10:23:45',
+  })
+  captured_at?: string;
+
   @ApiPropertyOptional({
     description: 'ยืนยันจดทับบิลเดือนเดียวกันที่มีอยู่แล้ว (ลบใบเดิมทิ้งก่อน)',
     default: false,
@@ -41,6 +71,22 @@ export class CreateBillFromScanDto {
     default: false,
   })
   confirm_high_usage?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'ยืนยันว่าเลขที่ต่ำกว่าเดือนก่อนเกิดจากการเปลี่ยนมิเตอร์ใหม่ หรือมิเตอร์นับครบรอบแล้ววนกลับเป็น 0 — ' +
+      'ระบบจะเริ่มนับจาก 0 ให้ ไม่ใช่ปฏิเสธการออกบิล',
+    default: false,
+  })
+  confirm_meter_reset?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'เลขปิดของมิเตอร์ตัวเก่า ณ วันที่ถอดออก (ใช้คู่กับ confirm_meter_reset) — ' +
+      'กรอกมาด้วยจะได้คิดน้ำที่ใช้ก่อนเปลี่ยนมิเตอร์เข้าไปในบิลนี้ครบ ไม่กรอกจะคิดเฉพาะมิเตอร์ตัวใหม่',
+    example: 1320,
+  })
+  old_meter_final_unit?: number;
 
   @ApiPropertyOptional({
     description:

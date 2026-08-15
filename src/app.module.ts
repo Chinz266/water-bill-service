@@ -25,6 +25,8 @@ import { MeterReadingEntity } from './entity/meter-reading.entity';
 import { MeterReadingsController } from './controller/meter-readings.controller';
 import { MeterReadingsService } from './service/meter-readings.service';
 import { MeterPhotoService } from './service/meter-photo.service';
+import { ScanBatchService } from './service/scan-batch.service';
+import { PhotoMetadataService } from './service/photo-metadata.service';
 import { BillEntity } from './entity/bill.entity';
 import { BillsService } from './service/bills.service';
 import { BillsController } from './controller/bills.controller';
@@ -114,6 +116,8 @@ import {
     VillagesService,
     MeterReadingsService,
     MeterPhotoService,
+    ScanBatchService,
+    PhotoMetadataService,
     BillsService,
     AuthService,
     MemberPortalService,

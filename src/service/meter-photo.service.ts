@@ -53,7 +53,12 @@ export class MeterPhotoService {
         // rotate() ที่ไม่ใส่องศา = หมุนตาม EXIF ของกล้องมือถือ แล้วลบ EXIF ทิ้ง
         // ไม่ทำแล้วรูปจากบางรุ่นจะตะแคงเวลาเปิดดูบนเว็บ ทั้งที่ตอนถ่ายเห็นตรง
         .rotate()
-        .resize({ width: 800, height: 800, fit: 'inside', withoutEnlargement: true })
+        .resize({
+          width: 800,
+          height: 800,
+          fit: 'inside',
+          withoutEnlargement: true,
+        })
         .jpeg({ quality: 60 })
         .toBuffer();
     } catch (error) {

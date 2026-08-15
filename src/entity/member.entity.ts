@@ -28,10 +28,15 @@ export class MemberEntity {
   })
   latitude!: number;
 
+  // ⚠️ precision ต้องเป็น 11 ไม่ใช่ 10 เหมือน latitude
+  //    decimal(10,8) เหลือที่หน้าจุดแค่ 2 หลัก = สูงสุด 99.99999999
+  //    แต่ลองจิจูดไทยอยู่ที่ 97–106 (3 หลัก) ค่าอย่าง 102.09 จึงล้นทุกครั้ง
+  //    → MySQL strict mode เด้ง error 1264, ถ้าไม่ strict จะตัดเหลือ 99.99999999 เงียบ ๆ
+  //    (latitude ไม่มีปัญหา ไทยอยู่ 5–20 = 2 หลัก พอดี decimal(10,8))
   @Column({
     name: 'longitude',
     type: 'decimal',
-    precision: 10,
+    precision: 11,
     scale: 8,
     nullable: true,
   })

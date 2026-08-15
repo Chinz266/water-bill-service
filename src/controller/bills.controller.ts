@@ -7,11 +7,23 @@ import {
   Patch,
   Delete,
   Query,
+  UseInterceptors,
+  UploadedFiles,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { FilesInterceptor } from '@nestjs/platform-express';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiBearerAuth,
+  ApiConsumes,
+  ApiBody,
+} from '@nestjs/swagger';
+import 'multer';
 import { BillsService } from 'src/service/bills.service';
+import { ScanBatchService } from 'src/service/scan-batch.service';
 import { CreateBillDto } from 'src/dto/create-bill.dto';
 import { CreateBillFromScanDto } from 'src/dto/create-bill-from-scan.dto';
+import { ScanBatchDto } from 'src/dto/scan-batch.dto';
 import { Roles } from 'src/auth/roles.decorator';
 
 @ApiTags('Bills (บิลเรียกเก็บค่าน้ำ)')
@@ -21,7 +33,10 @@ import { Roles } from 'src/auth/roles.decorator';
 @ApiBearerAuth()
 @Controller('bills')
 export class BillsController {
-  constructor(private readonly billsService: BillsService) {}
+  constructor(
+    private readonly billsService: BillsService,
+    private readonly scanBatchService: ScanBatchService,
+  ) {}
 
   @Post()
   @ApiOperation({ summary: 'สร้างบิลค่าน้ำใหม่ (ระบบจะคำนวณยอดให้อัตโนมัติ)' })
@@ -38,6 +53,42 @@ export class BillsController {
     return await this.billsService.createFromScan(dto);
   }
 
+  @Post('scan-batch')
+  @ApiOperation({
+    summary:
+      'อัปรูปมิเตอร์หลายใบพร้อมกัน แล้วให้ระบบเดาว่ารูปไหนเป็นของบ้านหลังไหน (ไม่เขียนฐานข้อมูล)',
+    description:
+      'จับคู่จาก "เลขมิเตอร์" ไม่ใช่ GPS — เลขมิเตอร์เป็นยอดสะสมที่แต่ละบ้านห่างกันมาก ' +
+      'จึงชี้กลับไปหาบ้านต้นทางได้เอง โดยตัดบ้านที่ทำให้หน่วยน้ำติดลบทิ้ง ' +
+      'แล้วให้คะแนนตามว่าหน่วยที่ใช้ใกล้เคียงกับที่บ้านนั้นเคยใช้แค่ไหน\n\n' +
+      '⚠️ คืนแค่ข้อเสนอ ยังไม่ออกบิล — เมื่อคนตรวจยืนยันแล้วให้ยิง POST /bills/scan ทีละหลัง ' +
+      'เพราะด่านกันข้อมูลผิดทั้งหมดอยู่ที่นั่น',
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['files', 'billing_month', 'billing_year'],
+      properties: {
+        files: {
+          type: 'array',
+          items: { type: 'string', format: 'binary' },
+          description: 'รูปมิเตอร์หลายใบ (สูงสุด 30 รูปต่อครั้ง)',
+        },
+        billing_month: { type: 'string', example: '08' },
+        billing_year: { type: 'string', example: '2026' },
+        villages_id: { type: 'number', example: 1 },
+      },
+    },
+  })
+  @UseInterceptors(FilesInterceptor('files', ScanBatchService.MAX_FILES))
+  async scanBatch(
+    @UploadedFiles() files: Express.Multer.File[],
+    @Body() dto: ScanBatchDto,
+  ) {
+    return await this.scanBatchService.analyze(files, dto);
+  }
+
   @Delete(':id')
   @ApiOperation({ summary: 'ลบบิลค่าน้ำตาม ID' })
   async remove(@Param('id') id: string) {
@@ -47,7 +98,8 @@ export class BillsController {
   // ⚠️ ต้องอยู่ก่อน @Get(':id') ไม่งั้น 'member' จะถูกจับเป็น id แล้วคิวรีเพี้ยน
   @Get('member/:membersId/month')
   @ApiOperation({
-    summary: 'เช็คว่าบ้านหลังนี้มีบิลของเดือน/ปีที่ระบุแล้วหรือยัง (null = ยังไม่มี)',
+    summary:
+      'เช็คว่าบ้านหลังนี้มีบิลของเดือน/ปีที่ระบุแล้วหรือยัง (null = ยังไม่มี)',
   })
   async findByMemberAndMonth(
     @Param('membersId') membersId: string,

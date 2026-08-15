@@ -17,8 +17,19 @@ import {
   REPORT_PHOTO_MAX,
   REPORT_STATUSES,
   ReportCategory,
-  ReportStatus,
 } from 'src/report/report.constants';
+
+/** คอลัมน์ดิบที่ detailQuery() ดึงมาจาก join (ชื่อ = alias_ชื่อคอลัมน์) */
+interface ReportDetailRow {
+  member_id?: number | null;
+  member_house_no?: string | null;
+  member_fname?: string | null;
+  member_lname?: string | null;
+  member_phone?: string | null;
+  replier_id?: number | null;
+  replier_fname?: string | null;
+  replier_lname?: string | null;
+}
 
 @Injectable()
 export class ReportsService {
@@ -43,7 +54,9 @@ export class ReportsService {
   private validateDetail(detail: string | undefined): string {
     const trimmed = (detail ?? '').trim();
     if (!trimmed) {
-      throw new BadRequestException('กรุณากรอกรายละเอียดของเรื่องที่ต้องการแจ้ง');
+      throw new BadRequestException(
+        'กรุณากรอกรายละเอียดของเรื่องที่ต้องการแจ้ง',
+      );
     }
     if (trimmed.length > REPORT_DETAIL_MAX) {
       throw new BadRequestException(
@@ -106,7 +119,7 @@ export class ReportsService {
     const { entities, raw } = await this.detailQuery()
       .where('report.members_id IN (:...memberIds)', { memberIds })
       .orderBy('report.create_date', 'DESC')
-      .getRawAndEntities();
+      .getRawAndEntities<ReportDetailRow>();
 
     return entities.map((report, index) => this.toDetail(report, raw[index]));
   }
@@ -119,7 +132,7 @@ export class ReportsService {
   async findAll() {
     const { entities, raw } = await this.detailQuery()
       .orderBy('report.create_date', 'DESC')
-      .getRawAndEntities();
+      .getRawAndEntities<ReportDetailRow>();
 
     return entities.map((report, index) => this.toDetail(report, raw[index]));
   }
@@ -135,7 +148,7 @@ export class ReportsService {
       if (!REPORT_STATUSES.includes(dto.status)) {
         throw new BadRequestException('สถานะไม่ถูกต้อง');
       }
-      report.status = dto.status as ReportStatus;
+      report.status = dto.status;
     }
 
     if (dto.admin_reply !== undefined) {
@@ -186,7 +199,7 @@ export class ReportsService {
       ]);
   }
 
-  private toDetail(report: ReportEntity, row: Record<string, any>) {
+  private toDetail(report: ReportEntity, row: ReportDetailRow | undefined) {
     return {
       ...report,
       member: row?.member_id

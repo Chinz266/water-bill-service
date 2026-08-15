@@ -1021,7 +1021,7 @@ CREATE TABLE `members` (
   `house_no` varchar(45) DEFAULT NULL,
   `phone` varchar(20) DEFAULT NULL,
   `latitude` decimal(10,8) DEFAULT NULL COMMENT 'พิกัดละติจูด (เผื่อพนักงานใช้แผนที่นำทางไปบ้าน)',
-  `longitude` decimal(10,8) DEFAULT NULL COMMENT 'พิกัดลองจิจูด',
+  `longitude` decimal(11,8) DEFAULT NULL COMMENT 'พิกัดลองจิจูด (ต้องเป็น 11,8 ลองจิจูดไทย 97-106 มี 3 หลักหน้าจุด)',
   `villages_id` int(11) NOT NULL,
   `craeta_date` date NOT NULL,
   `craete_by` int(11) NOT NULL,

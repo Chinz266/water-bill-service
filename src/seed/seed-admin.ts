@@ -28,10 +28,20 @@ const dataSource = new DataSource({
   synchronize: false,
 });
 
+// runner.query() คืนค่าเป็น any — ห่อไว้ที่เดียวเพื่อระบุชนิดของแถวที่ SHOW ... คืนมา
+async function queryRows<TRow>(
+  runner: QueryRunner,
+  sql: string,
+): Promise<TRow[]> {
+  const rows: unknown = await runner.query(sql);
+  return Array.isArray(rows) ? (rows as TRow[]) : [];
+}
+
 // db/water-bill-db.sql เก่ากว่า AdminEntity อยู่ 5 คอลัมน์ (ดู README หัวข้อ "การแก้ schema ที่ทำไปแล้ว")
 // เติมให้ครบก่อน ไม่งั้น repository จะพังด้วย Unknown column 'AdminEntity.email'
 async function ensureAdminSchema(runner: QueryRunner): Promise<void> {
-  const columns: { Field: string }[] = await runner.query(
+  const columns = await queryRows<{ Field: string }>(
+    runner,
     'SHOW COLUMNS FROM `admin`',
   );
   const has = (name: string) => columns.some((column) => column.Field === name);
@@ -81,7 +91,8 @@ async function ensureAdminSchema(runner: QueryRunner): Promise<void> {
 
   // 🌟 bcrypt hash ยาว 60 ตัว แต่ schema เดิมเป็น varchar(45)
   //    ถ้าไม่ขยายก่อน MySQL จะตัด hash ทิ้งเงียบ ๆ แล้วล็อกอินไม่ผ่านตลอดกาล
-  const passwordColumn: { Type: string }[] = await runner.query(
+  const passwordColumn = await queryRows<{ Type: string }>(
+    runner,
     "SHOW COLUMNS FROM `admin` WHERE Field = 'password'",
   );
   if (passwordColumn[0] && /varchar\((\d+)\)/i.test(passwordColumn[0].Type)) {
@@ -96,7 +107,8 @@ async function ensureAdminSchema(runner: QueryRunner): Promise<void> {
     }
   }
 
-  const indexes: { Key_name: string }[] = await runner.query(
+  const indexes = await queryRows<{ Key_name: string }>(
+    runner,
     'SHOW INDEX FROM `admin`',
   );
   if (!indexes.some((index) => index.Key_name === 'IDX_admin_email')) {

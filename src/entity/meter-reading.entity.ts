@@ -14,6 +14,24 @@ export class MeterReadingEntity {
   @Column({ length: 1000, nullable: true })
   evidence_photo!: string; // Path หรือ URL ของรูปถ่ายมิเตอร์น้ำ
 
+  // 🌟 พิกัดของ "จุดที่ยืนถ่ายรูป" ไม่ใช่พิกัดบ้านในทะเบียน
+  //    เก็บทุกครั้งที่จด เพื่อให้ระบบเรียนรู้เองว่ามิเตอร์ของบ้านหลังนี้อยู่ตรงไหนจริง ๆ
+  //    (ดู db/migrate-reading-location.sql ว่าทำไมใช้ members.latitude แทนไม่ได้)
+  @Column({ type: 'decimal', precision: 10, scale: 8, nullable: true })
+  latitude!: number | null;
+
+  // precision 11 — ลองจิจูดไทย 97-106 มี 3 หลักหน้าจุด
+  @Column({ type: 'decimal', precision: 11, scale: 8, nullable: true })
+  longitude!: number | null;
+
+  /** ความคลาดเคลื่อนเป็นเมตร — Geolocation API มีให้ ส่วน EXIF ไม่มี (คงเป็น null) */
+  @Column({ type: 'int', nullable: true })
+  gps_accuracy_m!: number | null;
+
+  /** เวลากดชัตเตอร์จริง — reading_date เป็น date ไม่มีเวลา จึงจับรูปใช้ซ้ำไม่ได้ */
+  @Column({ type: 'datetime', nullable: true })
+  captured_at!: Date | null;
+
   // 🌟 ชื่อคอลัมน์จริงใน DB คือ members_id1 (มี 1 ต่อท้าย)
   @Column({ name: 'members_id1' })
   members_id!: number; // ID ของลูกบ้าน

@@ -9,6 +9,7 @@ import { MeterReadingEntity } from '../entity/meter-reading.entity'; // เช�
 import { AdminEntity } from '../entity/admin.entity';
 import { MemberEntity } from '../entity/member.entity';
 import { CreateMeterReadingDto } from '../dto/create-meter-reading.dto';
+import { PhotoMetadataService } from './photo-metadata.service';
 
 @Injectable()
 export class MeterReadingsService {
@@ -24,6 +25,7 @@ export class MeterReadingsService {
     private readonly memberRepository: Repository<MemberEntity>,
     private readonly httpService: HttpService,
     private readonly configService: ConfigService,
+    private readonly photoMetadataService: PhotoMetadataService,
   ) {
     // URL ของ Python vision service (best.pt) ตั้งค่าผ่าน .env ได้
     this.visionServiceUrl = this.configService.get<string>(
@@ -82,6 +84,10 @@ export class MeterReadingsService {
     const startTime = Date.now();
     this.logger.log('Starting water meter reading via YOLO vision service...');
 
+    // อ่าน EXIF จาก buffer ต้นฉบับก่อนส่งต่อให้ใคร — วันเวลาและพิกัดที่กล้องบันทึกไว้
+    // ต้องมาก่อน request ไป vision service เผื่อฝั่งนั้นล่มก็ยังได้ข้อมูลส่วนนี้
+    const photo_taken = this.photoMetadataService.read(imageBuffer);
+
     try {
       // เตรียม multipart form ส่งรูปไปให้ Python service
       const form = new FormData();
@@ -118,9 +124,19 @@ export class MeterReadingsService {
         );
         return {
           success: true,
-          read_unit: data.full_reading,
+          // 🌟 ต้องเป็น "ส่วนจำนวนเต็ม" (เลขสีดำบนหน้าปัด = ลูกบาศก์เมตร) เท่านั้น
+          //    ของเดิมส่ง full_reading ซึ่งรวมเลขทศนิยม (เข็มแดง) มาด้วย
+          //    มิเตอร์ที่อ่านได้ 25.312 จึงกลายเป็น 25312 — ใหญ่เกินจริง 1,000 เท่า
+          //    หน้าเว็บเอาค่านี้ไป Math.round() แล้วส่งเป็น current_unit ตรง ๆ
+          //    (meter-cropper.ts) ไม่ได้แปลงอะไรเพิ่ม ตัวเลขผิดจึงกลายเป็นยอดเงินผิดทันที
+          read_unit: data.integer_part ?? data.full_reading,
+          // ส่งเลขดิบไปด้วยเผื่อหน้าเว็บอยากโชว์ทศนิยมให้คนตรวจเทียบกับหน้าปัด
+          integer_part: data.integer_part ?? data.read_unit,
+          decimal_part: data.decimal_part,
+          full_reading: data.full_reading,
           // ส่ง confidence ต่อให้หน้าเว็บด้วย เอาไว้ทำแถบบอกว่าอ่านได้ชัดแค่ไหน
           confidence: data.confidence,
+          photo_taken,
           message: 'สกัดค่าตัวเลขสำเร็จ',
         };
       }
@@ -128,9 +144,15 @@ export class MeterReadingsService {
       this.logger.warn(
         `Vision service found no digits. Total time: ${Date.now() - startTime}ms`,
       );
+      // คืนคีย์ชุดเดียวกับตอนสำเร็จ (เป็น null) ผู้เรียกจะได้ไม่ต้องเดาว่ามีฟิลด์ไหนบ้าง
       return {
         success: false,
         read_unit: null,
+        integer_part: null,
+        decimal_part: null,
+        full_reading: null,
+        confidence: 0,
+        photo_taken,
         message:
           data.message ||
           'วิเคราะห์ภาพแล้ว แต่ได้ตัวเลขไม่ครบถ้วน กรุณาถ่ายให้ชัดเจนขึ้น',
