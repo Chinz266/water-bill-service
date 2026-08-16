@@ -4,6 +4,7 @@ import { ScanBatchService } from './scan-batch.service';
 import { BillsService } from './bills.service';
 import { MeterReadingsService } from './meter-readings.service';
 import { MemberEntity } from '../entity/member.entity';
+import { VillageEntity } from '../entity/village.entity';
 import { PhotoMetadata, PhotoMetadataService } from './photo-metadata.service';
 import { ScanBatchDto } from '../dto/scan-batch.dto';
 
@@ -52,6 +53,9 @@ const baselineOf = (
       previous_unit: row.previous_unit,
       source: 'bill' as const,
       usage_history: row.usage_history,
+      // คิดด้วยสูตรจริงของ BillsService ไม่ใช่ค่าที่เทสต์ตั้งเอง — ถ้าวันหลัง
+      // สูตรเปลี่ยน (เช่นย้ายจาก median เป็นอย่างอื่น) เทสต์ต้องเปลี่ยนตามไปเอง
+      typical_usage: BillsService.usageBaseline(row.usage_history),
       already_billed: row.already_billed ?? false,
     });
   }
@@ -93,6 +97,7 @@ const dto: ScanBatchDto = { billing_month: '08', billing_year: '2026' };
 describe('ScanBatchService — จับคู่รูปกับบ้านจากเลขมิเตอร์', () => {
   let service: ScanBatchService;
   let memberRepository: { find: jest.Mock };
+  let villageRepository: { findOne: jest.Mock };
   let meterReadingsService: { extractMeterUnit: jest.Mock };
   let billsService: {
     previousUnitsForMembers: jest.Mock;
@@ -120,6 +125,8 @@ describe('ScanBatchService — จับคู่รูปกับบ้าน�
 
   beforeEach(() => {
     memberRepository = { find: jest.fn().mockResolvedValue(MEMBERS) };
+    // ค่าเริ่มต้น = หมู่บ้านยังไม่ได้กรอก meter_pitch_m จึงได้รัศมีค่ากลาง 150 ม.
+    villageRepository = { findOne: jest.fn().mockResolvedValue(null) };
     meterReadingsService = { extractMeterUnit: jest.fn() };
     billsService = {
       previousUnitsForMembers: jest.fn(),
@@ -134,6 +141,7 @@ describe('ScanBatchService — จับคู่รูปกับบ้าน�
 
     service = new ScanBatchService(
       memberRepository as unknown as Repository<MemberEntity>,
+      villageRepository as unknown as Repository<VillageEntity>,
       meterReadingsService as unknown as MeterReadingsService,
       billsService as unknown as BillsService,
       photoMetadataService as unknown as PhotoMetadataService,
@@ -378,6 +386,64 @@ describe('ScanBatchService — จับคู่รูปกับบ้าน�
         expect.stringMatching(/ห่างจากพิกัดบ้าน 12\/3/),
       ]);
       expect(res.results[0].suggestion?.distance_m).toBeGreaterThan(1000);
+    });
+
+    /**
+     * รัศมี "ไกลจนน่าสงสัย" ต้องหดตามความหนาแน่นของหมู่บ้าน
+     *
+     * ค่าคงที่ 150 ม. เหมาะกับชนบทที่มิเตอร์ห่างกัน 15 ม. แต่ในทาวน์โฮมที่ห่างกัน
+     * 6 ม. รัศมีเท่านั้นครอบบ้านเกินครึ่งหมู่บ้าน กลายเป็นด่านที่ไม่ตัดอะไรเลย
+     */
+    describe('รัศมีเตือนคิดจาก meter_pitch_m ของหมู่บ้าน', () => {
+      it('หมู่บ้านที่ยังไม่กรอก ใช้ค่ากลาง = 150 ม. เท่าพฤติกรรมเดิม', () => {
+        expect(ScanBatchService.farThresholdFor(null)).toBe(150);
+        expect(ScanBatchService.farThresholdFor(undefined)).toBe(150);
+        expect(ScanBatchService.farThresholdFor(15)).toBe(150);
+      });
+
+      it('ทาวน์โฮมหน้าแคบได้รัศมีที่หดลง', () => {
+        // 6 × 10 = 60 แต่โดนยกขึ้นเป็นขอบล่าง 80 เพื่อไม่ให้ชิด GPS_NEAR_M เกินไป
+        expect(ScanBatchService.farThresholdFor(6)).toBe(80);
+        expect(ScanBatchService.farThresholdFor(10)).toBe(100);
+      });
+
+      it('ไม่หลุดเกินขอบบน-ล่าง แม้ pitch จะสุดโต่ง', () => {
+        expect(ScanBatchService.farThresholdFor(2)).toBe(80);
+        expect(ScanBatchService.farThresholdFor(60)).toBe(150);
+        // 0 ถือว่าไม่ได้กรอก ไม่ใช่ "ระยะศูนย์เมตร"
+        expect(ScanBatchService.farThresholdFor(0)).toBe(150);
+      });
+
+      it('ระบุ villages_id มา จะอ่าน pitch ของหมู่บ้านนั้นมาใช้จริง', async () => {
+        villageRepository.findOne.mockResolvedValue({
+          id: 7,
+          meter_pitch_m: 6,
+        });
+        memberRepository.find.mockResolvedValue([
+          // ~100 ม. จากจุดถ่าย: เดิมไม่เตือน (< 150) ตอนนี้ต้องเตือน (> 80)
+          member(1, '12/3', { latitude: 14.9809, longitude: 102.0977 }),
+        ]);
+        billsService.previousUnitsForMembers.mockResolvedValue(
+          baselineOf({ 1: { previous_unit: 1250, usage_history: [9, 8, 10] } }),
+        );
+        photoMetadataService.read.mockReturnValue({
+          has_exif: true,
+          captured_at: null,
+          latitude: 14.98,
+          longitude: 102.0977,
+        });
+        ocrReturns('1258');
+
+        const res = await service.analyze([fakeFile()], {
+          ...dto,
+          villages_id: 7,
+        });
+
+        expect(villageRepository.findOne).toHaveBeenCalled();
+        expect(res.results[0].warnings).toEqual([
+          expect.stringMatching(/ห่างจากพิกัดบ้าน 12\/3/),
+        ]);
+      });
     });
 
     it('พิกัดที่เรียนรู้จากการจดจริง ชนะหมุดในทะเบียน', async () => {

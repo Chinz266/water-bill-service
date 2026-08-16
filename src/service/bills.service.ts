@@ -19,6 +19,7 @@ import {
 import { CreateBillDto } from 'src/dto/create-bill.dto';
 import { CreateBillFromScanDto } from 'src/dto/create-bill-from-scan.dto';
 import { MeterPhotoService } from './meter-photo.service';
+import { PhotoMetadataService } from './photo-metadata.service';
 
 /**
  * คอลัมน์ดิบที่ billDetailQuery() ดึงมาจาก join (ชื่อ = alias_ชื่อคอลัมน์)
@@ -44,6 +45,57 @@ interface BillDetailRow {
   province_name_in_thai?: string | null;
 }
 
+/**
+ * รหัสของด่านที่บล็อกการออกบิล — ส่งไปกับ body ของ error ทุกครั้ง
+ *
+ * ═══ ทำไมต้องมี ═══
+ *
+ * หน้าเว็บต้องรู้ว่า 409 ที่ได้มาเป็นด่านไหน เพื่อขึ้นปุ่มยืนยันให้ถูกตัว
+ * ก่อนหน้านี้แยกด้วยการหาคำในข้อความไทย (`error.includes('หลัก')`) ซึ่งพังทันที
+ * ที่มีด่านใหม่ที่ข้อความบังเอิญมีคำเดียวกัน — และข้อความก็ถูกแก้บ่อยกว่าโค้ด
+ *
+ * ค่าพวกนี้เป็นส่วนหนึ่งของสัญญา API แล้ว **ห้ามเปลี่ยนชื่อ** โดยไม่แก้หน้าเว็บด้วย
+ * (ข้อความภาษาไทยแก้ได้อิสระ เพราะไม่มีใครเอาไปเทียบอีกแล้ว)
+ */
+export const BILL_ERROR_CODES = {
+  /** หน่วยน้ำสูงผิดปกติ → `confirm_high_usage` */
+  HIGH_USAGE: 'HIGH_USAGE',
+  /** จำนวนหลักบนหน้าปัดเปลี่ยน → `confirm_digit_change` */
+  DIGIT_CHANGE: 'DIGIT_CHANGE',
+  /** OCR อ่านไม่ชัด → `confirm_low_confidence` */
+  LOW_CONFIDENCE: 'LOW_CONFIDENCE',
+  /** พิกัดซ้ำเป๊ะทุกทศนิยม → `confirm_duplicate_location` */
+  DUPLICATE_LOCATION: 'DUPLICATE_LOCATION',
+  /** รูปถ่ายไว้นานเกิน 30 วัน → `confirm_stale_photo` */
+  STALE_PHOTO: 'STALE_PHOTO',
+  /** เลขต่ำกว่าเดือนก่อน → `confirm_meter_reset` */
+  METER_ROLLBACK: 'METER_ROLLBACK',
+  /** มีบิลเดือนนี้แล้ว → `replace` */
+  BILL_EXISTS: 'BILL_EXISTS',
+
+  // ═══ ด่านที่ "ไม่มีปุ่มยืนยัน" — หน้าเว็บต้องไม่ขึ้นปุ่มให้กดข้าม ═══
+
+  /** ไฟล์รูปเดิมถูกอัปซ้ำ (captured_at ตรงเป๊ะ) — ต้องถ่ายใหม่เท่านั้น */
+  PHOTO_REUSED: 'PHOTO_REUSED',
+  /** บิลเดือนนี้จ่ายเงินแล้ว — ต้องปรับสถานะกลับเป็นค้างชำระก่อน */
+  BILL_PAID: 'BILL_PAID',
+  /** มีบิลเดือนที่ใหม่กว่าอยู่ — ต้องลบใบนั้นก่อน */
+  LATER_BILL_EXISTS: 'LATER_BILL_EXISTS',
+} as const;
+
+export type BillErrorCode =
+  (typeof BILL_ERROR_CODES)[keyof typeof BILL_ERROR_CODES];
+
+/**
+ * body ของ error ที่มีทั้งข้อความไทยและรหัสให้เครื่องอ่าน
+ *
+ * คง `message` ไว้ที่เดิมเป๊ะ ๆ เพราะ extractErrorMessage() ของหน้าเว็บอ่านจากตรงนั้น
+ * — เพิ่ม `code` เข้าไปเฉย ๆ หน้าเว็บรุ่นเก่าจึงไม่พังระหว่างที่ยังไม่ได้อัปเดต
+ */
+function billError(code: BillErrorCode, message: string, statusCode: number) {
+  return { statusCode, message, code };
+}
+
 @Injectable()
 export class BillsService {
   constructor(
@@ -55,6 +107,13 @@ export class BillsService {
 
     @InjectRepository(MeterReadingEntity)
     private readonly meterReadingRepository: Repository<MeterReadingEntity>,
+
+    // ใช้หา villages_id ของบ้าน เพื่อไปเอารอบชำระของหมู่บ้านนั้นมาคิด due_date
+    @InjectRepository(MemberEntity)
+    private readonly memberRepository: Repository<MemberEntity>,
+
+    @InjectRepository(VillageEntity)
+    private readonly villageRepository: Repository<VillageEntity>,
 
     private readonly meterPhotoService: MeterPhotoService,
   ) {}
@@ -98,6 +157,16 @@ export class BillsService {
   /** '2026' + '07' → 202607 ใช้เทียบว่าเดือนไหนมาก่อนมาหลัง (เทียบ string ตรง ๆ จะพลาดตอนข้ามปี) */
   private monthKey(year: string | number, month: string | number): number {
     return Number(year) * 100 + Number(month);
+  }
+
+  /**
+   * เดือนแบบนับต่อเนื่องไม่ขาดตอน ('2026' + '01' → 24313) ใช้ **ลบกัน** เพื่อหาจำนวนเดือน
+   *
+   * ต่างจาก monthKey ที่ใช้เทียบลำดับได้อย่างเดียว — 202601 - 202512 = 89 ไม่ใช่ 1
+   * เพราะช่องว่างระหว่างปีใน monthKey มี 88 ค่าที่ไม่มีจริง
+   */
+  private monthIndex(year: string | number, month: string | number): number {
+    return Number(year) * 12 + Number(month);
   }
 
   /** เรียงบิลจากเดือนเก่าไปใหม่ */
@@ -256,9 +325,31 @@ export class BillsService {
    */
   private static readonly MIN_READINGS_FOR_REFERENCE = 2;
 
-  learnedMeterLocations(
-    readings: MeterReadingEntity[],
-  ): Map<number, { latitude: number; longitude: number; samples: number }> {
+  learnedMeterLocations(readings: MeterReadingEntity[]): Map<
+    number,
+    {
+      latitude: number;
+      longitude: number;
+      samples: number;
+      /**
+       * MAD — มัธยฐานของระยะจากจุดกลางถึงแต่ละครั้งที่เคยไปจด (เมตร)
+       *
+       * ═══ ทำไมต้องมีค่านี้ ═══
+       *
+       * ก่อนหน้านี้ทุกบ้านใช้รัศมี "ใกล้" เท่ากันหมด (GPS_NEAR_M = 50 ม.) ทั้งที่
+       * ความแม่นจริงต่างกันมากตามสภาพหน้างาน — มิเตอร์กลางทุ่งโล่งจับดาวเทียมได้
+       * 8 ดวง กระจายไม่ถึง 5 ม. ส่วนมิเตอร์ใต้ชายคาติดกำแพงกระจายได้ถึง 40 ม.
+       * รัศมีเดียวกันจึงหลวมเกินไปสำหรับบ้านแรก และคับเกินไปสำหรับบ้านหลัง
+       *
+       * MAD คือ "รัศมีจริงของบ้านหลังนี้" ที่วัดมาจากข้อมูลของบ้านหลังนั้นเอง
+       * ใช้มัธยฐาน ไม่ใช่ส่วนเบี่ยงเบนมาตรฐาน ด้วยเหตุผลเดียวกับจุดกลาง:
+       * ครั้งที่ GPS ยังไม่ fix ให้พิกัดผิดเป็นกิโล ซึ่งจะทำให้ SD ระเบิด
+       *
+       * null = มีตัวอย่างน้อยเกินกว่าจะประเมินการกระจาย
+       */
+      spread_m: number | null;
+    }
+  > {
     const byMember = new Map<number, { lat: number[]; lng: number[] }>();
 
     for (const r of readings) {
@@ -283,14 +374,38 @@ export class BillsService {
 
     const result = new Map<
       number,
-      { latitude: number; longitude: number; samples: number }
+      {
+        latitude: number;
+        longitude: number;
+        samples: number;
+        spread_m: number | null;
+      }
     >();
     for (const [membersId, bucket] of byMember) {
       if (bucket.lat.length < BillsService.MIN_READINGS_FOR_REFERENCE) continue;
+
+      const latitude = median(bucket.lat);
+      const longitude = median(bucket.lng);
+
+      // ต้องมีอย่างน้อย 3 จุดถึงจะพูดเรื่องการกระจายได้ — 2 จุดให้ MAD เท่ากับ
+      // ครึ่งหนึ่งของระยะระหว่างสองจุดเสมอ ซึ่งเป็นเลขที่ไม่ได้บอกอะไรเลย
+      const spread_m =
+        bucket.lat.length >= 3
+          ? median(
+              bucket.lat.map((lat, i) =>
+                PhotoMetadataService.distanceMeters(
+                  { latitude: lat, longitude: bucket.lng[i] },
+                  { latitude, longitude },
+                ),
+              ),
+            )
+          : null;
+
       result.set(membersId, {
-        latitude: median(bucket.lat),
-        longitude: median(bucket.lng),
+        latitude,
+        longitude,
         samples: bucket.lat.length,
+        spread_m: spread_m === null ? null : Math.round(spread_m * 10) / 10,
       });
     }
     return result;
@@ -343,8 +458,14 @@ export class BillsService {
       {
         previous_unit: number;
         source: 'bill' | 'registration' | 'none';
-        /** หน่วยน้ำที่บ้านนี้เคยใช้ (เฉพาะเดือนก่อนหน้าเดือนเป้าหมาย) */
+        /** หน่วยน้ำที่บ้านนี้เคยใช้ (เฉพาะเดือนก่อนหน้าเดือนเป้าหมาย เรียงเก่า→ใหม่) */
         usage_history: number[];
+        /**
+         * หน่วยที่บ้านนี้ใช้ตามปกติ — median ของ 6 เดือนล่าสุด (null = ยังไม่มีประวัติ)
+         * ต้องคิดด้วย BillsService.usageBaseline() ตัวเดียวกับด่านตอนออกบิลเป๊ะ ๆ
+         * ไม่งั้นหน้าอัปรูปจะเสนอบ้านที่พอกดยืนยันจริงแล้วโดนตีกลับเป็น 409
+         */
+        typical_usage: number | null;
         /** มีบิลของเดือนเป้าหมายอยู่แล้วหรือยัง */
         already_billed: boolean;
       }
@@ -369,6 +490,7 @@ export class BillsService {
         previous_unit: number;
         source: 'bill' | 'registration' | 'none';
         usage_history: number[];
+        typical_usage: number | null;
         already_billed: boolean;
       }
     >();
@@ -381,15 +503,18 @@ export class BillsService {
         targetKey,
       });
 
+      const usage_history = bills
+        .filter(
+          (b) => this.monthKey(b.billing_year, b.billing_month) < targetKey,
+        )
+        .map((b) => Number(b.usage_unit))
+        .filter((u) => u > 0);
+
       result.set(membersId, {
         previous_unit: resolved.previous_unit,
         source: resolved.source,
-        usage_history: bills
-          .filter(
-            (b) => this.monthKey(b.billing_year, b.billing_month) < targetKey,
-          )
-          .map((b) => Number(b.usage_unit))
-          .filter((u) => u > 0),
+        usage_history,
+        typical_usage: BillsService.usageBaseline(usage_history),
         already_billed: bills.some(
           (b) => this.monthKey(b.billing_year, b.billing_month) === targetKey,
         ),
@@ -517,47 +642,160 @@ export class BillsService {
    * ไม่งั้นหน้าอัปรูปจะเสนอบ้านที่พอกดยืนยันจริงแล้วโดนด่านนี้ตีกลับ
    */
   static readonly USAGE_HARD_CAP = 1000;
-  /** กี่เท่าของค่าเฉลี่ยจึงถือว่าผิดปกติ */
+  /** กี่เท่าของค่ากลางจึงถือว่าผิดปกติ */
   static readonly USAGE_SPIKE_RATIO = 5;
   /** ต่ำกว่านี้ไม่ถือว่าผิดปกติแม้จะเกินอัตราส่วน (บ้านที่ปกติใช้ 2 หน่วย) */
   static readonly USAGE_SPIKE_FLOOR = 50;
+
+  /**
+   * ย้อนดูบิลกี่ใบล่าสุดเพื่อหา "หน่วยที่บ้านหลังนี้ใช้ตามปกติ"
+   *
+   * 6 เดือนพอเห็นทั้งหน้าร้อนและหน้าฝน แต่ไม่ยาวจนพฤติกรรมเมื่อ 3 ปีก่อน
+   * (ตอนยังไม่มีเครื่องซักผ้า / คนอยู่บ้านคนละจำนวน) มาถ่วงเกณฑ์ของวันนี้
+   */
+  static readonly USAGE_BASELINE_MONTHS = 6;
+
+  /**
+   * "หน่วยที่ใช้ตามปกติ" ของบ้านหลังหนึ่ง — null เมื่อยังไม่มีประวัติ
+   *
+   * ═══ ทำไมเป็น median ของ 6 เดือนล่าสุด ไม่ใช่ค่าเฉลี่ยของทุกใบ ═══
+   *
+   * ของเดิมใช้ค่าเฉลี่ยของบิลทุกใบตลอดกาล ซึ่งมีปัญหาสองชั้นที่ทับกัน:
+   *
+   *   1. ค่าเฉลี่ยถูกลากด้วยค่าโดด — บ้านที่ท่อแตกครั้งเดียว 400 หน่วย
+   *      จะดันค่าเฉลี่ยขึ้น **ถาวร** ด่านอ่อนลงทุกเดือนหลังจากนั้น
+   *   2. ยิ่งใช้งานนาน ยิ่งมีบิลเยอะ ค่าเฉลี่ยยิ่งขยับยาก ด่านที่ควรแม่นขึ้น
+   *      ตามข้อมูลที่มากขึ้นกลับด้านลงเรื่อย ๆ
+   *
+   * median ทนค่าโดดโดยธรรมชาติ (ค่าเดียวที่พุ่งไม่ขยับกลางเลย) และการตัดที่
+   * 6 เดือนทำให้เกณฑ์ตามพฤติกรรมปัจจุบันของบ้านหลังนั้นจริง ๆ
+   *
+   * แนวเดียวกับที่ learnedMeterLocations() ใช้ median กับพิกัด — ด้วยเหตุผลเดียวกัน
+   *
+   * static เพราะ ScanBatchService ต้องใช้สูตรเดียวกันเป๊ะ ไม่งั้นหน้าอัปรูป
+   * จะเสนอบ้านที่พอกดยืนยันจริงแล้วโดนด่านนี้ตีกลับเป็น 409
+   */
+  static usageBaseline(history: number[]): number | null {
+    const recent = history
+      .filter((u) => u > 0)
+      .slice(-BillsService.USAGE_BASELINE_MONTHS);
+    if (recent.length === 0) return null;
+
+    const sorted = [...recent].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 === 0
+      ? (sorted[mid - 1] + sorted[mid]) / 2
+      : sorted[mid];
+  }
 
   /**
    * กันเลขมิเตอร์ที่ AI อ่านผิดจนออกบิลมหาศาล
    *
    * ไม่บล็อกตายตัว เพราะบางทีก็ใช้เยอะจริง (ท่อแตก/เปิดลืม) แต่ต้องให้คนยืนยันก่อน
    * ไม่ใช่ผ่านไปเงียบ ๆ แล้วไปโผล่เป็นบิลที่ลูกบ้านต้องจ่าย
+   *
+   * ═══ ทำไมต้องหารด้วย period_months ═══
+   *
+   * บิลที่คาบ 2 เดือน (เพราะเดือนก่อนไม่ได้ไปจด) มีหน่วยน้ำเป็นสองเท่าโดยธรรมชาติ
+   * ถ้าเทียบตัวเลขดิบกับเกณฑ์รายเดือน จะเด้ง 409 ทั้งที่เลขถูกต้องทุกอย่าง
+   * แล้วคนก็จะชินกับการกดยืนยันผ่าน — ซึ่งทำให้ด่านนี้ไร้ความหมายในวันที่เลขผิดจริง
    */
   private assertUsageLooksSane(
     usage_unit: number,
     previousBills: BillEntity[],
     confirmHighUsage?: boolean,
+    period_months = 1,
   ) {
     if (confirmHighUsage) return;
 
-    const history = previousBills
-      .map((b) => Number(b.usage_unit))
-      .filter((u) => u > 0);
+    // เทียบ "หน่วยต่อเดือน" กับเกณฑ์ที่เป็นรายเดือนเหมือนกัน
+    const months = Math.max(1, period_months);
+    const perMonth = usage_unit / months;
+    const spanNote =
+      months > 1
+        ? ` (บิลนี้คาบ ${months} เดือน = เดือนละ ${Math.round(perMonth).toLocaleString('th-TH')} หน่วย)`
+        : '';
 
-    if (history.length > 0) {
-      const avg = history.reduce((sum, u) => sum + u, 0) / history.length;
+    const typical = BillsService.usageBaseline(
+      previousBills.map((b) => Number(b.usage_unit)),
+    );
+
+    if (typical !== null) {
       // ต้องเกิน 50 หน่วยด้วย ไม่งั้นบ้านที่ปกติใช้ 2 หน่วย พอใช้ 11 หน่วยก็เด้งแล้ว
       if (
-        usage_unit > avg * BillsService.USAGE_SPIKE_RATIO &&
-        usage_unit > BillsService.USAGE_SPIKE_FLOOR
+        perMonth > typical * BillsService.USAGE_SPIKE_RATIO &&
+        perMonth > BillsService.USAGE_SPIKE_FLOOR
       ) {
         throw new ConflictException(
-          `หน่วยน้ำที่คำนวณได้ (${usage_unit.toLocaleString('th-TH')} หน่วย) สูงกว่าที่บ้านหลังนี้เคยใช้มาก (เฉลี่ย ${Math.round(avg).toLocaleString('th-TH')} หน่วย) กรุณาตรวจสอบเลขมิเตอร์อีกครั้ง ถ้าถูกต้องแล้วให้กดยืนยันครับ`,
+          billError(
+            BILL_ERROR_CODES.HIGH_USAGE,
+            `หน่วยน้ำที่คำนวณได้ (${usage_unit.toLocaleString('th-TH')} หน่วย)${spanNote} สูงกว่าที่บ้านหลังนี้ใช้ตามปกติมาก (ปกติเดือนละ ${Math.round(typical).toLocaleString('th-TH')} หน่วย) กรุณาตรวจสอบเลขมิเตอร์อีกครั้ง ถ้าถูกต้องแล้วให้กดยืนยันครับ`,
+            409,
+          ),
         );
       }
       return;
     }
 
-    if (usage_unit > BillsService.USAGE_HARD_CAP) {
+    if (perMonth > BillsService.USAGE_HARD_CAP) {
       throw new ConflictException(
-        `หน่วยน้ำที่คำนวณได้ (${usage_unit.toLocaleString('th-TH')} หน่วย) สูงผิดปกติ กรุณาตรวจสอบเลขมิเตอร์อีกครั้ง ถ้าถูกต้องแล้วให้กดยืนยันครับ`,
+        billError(
+          BILL_ERROR_CODES.HIGH_USAGE,
+          `หน่วยน้ำที่คำนวณได้ (${usage_unit.toLocaleString('th-TH')} หน่วย)${spanNote} สูงผิดปกติ กรุณาตรวจสอบเลขมิเตอร์อีกครั้ง ถ้าถูกต้องแล้วให้กดยืนยันครับ`,
+          409,
+        ),
       );
     }
+  }
+
+  /**
+   * ความมั่นใจต่ำสุดที่ยอมให้ออกบิลโดยไม่ต้องกดยืนยัน
+   *
+   * 0.85 มาจากชุดทดสอบของ vision service — เคสที่อ่านผิดจริงทั้ง 4/4 เคส
+   * ได้ค่าต่ำกว่า 0.85 ทุกตัว (ดูคอมเมนต์ใน meter-vision-service/main.py)
+   */
+  static readonly MIN_READ_CONFIDENCE = 0.85;
+
+  /**
+   * กัน OCR อ่านผิดค่าโดยจำนวนหลักไม่เปลี่ยน (1250 → 1258)
+   *
+   * ═══ ทำไมด่านอื่นจับไม่ได้ ═══
+   *
+   * เคสนี้เคยเป็นช่องโหว่ที่ทะลุทุกด่าน:
+   *   - ด่านจำนวนหลัก: 1250 กับ 1258 มี 4 หลักเท่ากัน ผ่านฉลุย
+   *   - ด่านหน่วยพุ่ง: ต่างกันแค่ 8 หน่วย ห่างจากเกณฑ์ "เกินค่ากลาง 5 เท่า" มาก
+   *
+   * ตัวที่จับได้คือ confidence ซึ่ง vision service คืนมาเป็น **ค่าของหลักที่อ่อนที่สุด**
+   * (ไม่ใช่ค่าเฉลี่ย — ค่าเฉลี่ยจะกลบหลักที่ไม่ชัดจนมองไม่เห็น) ค่านี้ถูกส่งมาถึง
+   * NestJS อยู่แล้วตั้งแต่ต้น แต่ก่อนหน้านี้ถูกส่งต่อให้หน้าเว็บเฉย ๆ ไม่ได้เอามาเป็นด่าน
+   *
+   * เป็น 409 ให้กดยืนยัน ไม่ใช่บล็อกตาย เพราะรูปที่เบลอนิดหน่อยแต่คนตรวจดูแล้ว
+   * อ่านออกชัดเจนก็มีจริง — คนที่ถือรูปอยู่ตรงหน้าตัดสินได้ดีกว่าโมเดล
+   */
+  private assertReadingConfident(params: {
+    read_confidence?: number;
+    current_unit: number;
+    confirm_low_confidence?: boolean;
+  }): number | null {
+    const conf = Number(params.read_confidence);
+    // ไม่ได้ส่งมา = กรอกเลขเอง ไม่ได้ผ่าน OCR จึงไม่มีอะไรให้ตรวจ
+    if (!Number.isFinite(conf) || conf <= 0) return null;
+
+    if (
+      !params.confirm_low_confidence &&
+      conf < BillsService.MIN_READ_CONFIDENCE
+    ) {
+      throw new ConflictException(
+        billError(
+          BILL_ERROR_CODES.LOW_CONFIDENCE,
+          `ระบบอ่านเลขมิเตอร์ได้ไม่ชัดเจน (หลักที่ไม่ชัดที่สุดมั่นใจ ${Math.round(conf * 100)}% ต่ำกว่าเกณฑ์ ${Math.round(BillsService.MIN_READ_CONFIDENCE * 100)}%) เลขที่อ่านได้คือ ${params.current_unit.toLocaleString('th-TH')} — กรุณาเทียบกับรูปหน้าปัดทีละหลัก ถ้าตรงแล้วให้กดยืนยันครับ`,
+          409,
+        ),
+      );
+    }
+
+    // ปัดให้พอดีกับคอลัมน์ decimal(4,3) กันค่าอย่าง 0.8734999 ไปโดน MySQL ปัดเอง
+    return Math.round(conf * 1000) / 1000;
   }
 
   /** ย้อนดูการจดกี่ครั้งล่าสุดเพื่อหาจำนวนหลักอ้างอิง (ราวหนึ่งปี เผื่อเดือนที่กรอกมือปนอยู่) */
@@ -675,6 +913,158 @@ export class BillsService {
     };
   }
 
+  /** ให้เวลาชำระกี่วัน เมื่อหมู่บ้านไม่ได้ตั้งค่าไว้ — รอบที่พบบ่อยที่สุด */
+  static readonly DEFAULT_PAYMENT_DUE_DAYS = 15;
+
+  /**
+   * วันครบกำหนดชำระของบิลใบนี้ = วันจดมิเตอร์ + รอบชำระของหมู่บ้าน
+   *
+   * นับจากวันจด ไม่ใช่วันที่ 1 ของเดือนบิล เพราะลูกบ้านเริ่มรู้ยอดตอนที่พนักงาน
+   * ไปจดถึงหน้าบ้าน — จดวันที่ 28 แล้วให้ครบกำหนดวันที่ 15 ของเดือนเดียวกัน
+   * เท่ากับเลยกำหนดตั้งแต่วินาทีที่ออกบิล
+   */
+  private async resolveDueDate(
+    membersId: number,
+    reading_date: Date,
+  ): Promise<Date> {
+    const member = await this.memberRepository.findOne({
+      where: { id: membersId },
+    });
+    const village = member?.villages_id
+      ? await this.villageRepository.findOne({
+          where: { id: member.villages_id },
+        })
+      : null;
+
+    const days =
+      village?.payment_due_days && village.payment_due_days > 0
+        ? village.payment_due_days
+        : BillsService.DEFAULT_PAYMENT_DUE_DAYS;
+
+    // คัดลอกก่อนบวก — reading_date ถูกเอาไปเขียนลง meter_readings ด้วย
+    // แก้ตัวเดิมจะทำให้วันที่จดเลื่อนตามไปโดยไม่มีใครตั้งใจ
+    const due = new Date(reading_date);
+    due.setDate(due.getDate() + days);
+    return due;
+  }
+
+  /**
+   * บิลใบนี้คาบกี่เดือน — 1 คือปกติ, มากกว่านั้นแปลว่ามีเดือนที่ไม่ได้ไปจดคั่นอยู่
+   *
+   * นับจากบิลใบก่อนหน้าเท่านั้น ถ้ายังไม่เคยมีบิลเลย (ใบแรกของบ้าน) ถือเป็น 1
+   * เพราะช่วงก่อนหน้านั้นคือ "ก่อนเข้าระบบ" ซึ่งคิดเป็นคาบบิลไม่ได้
+   */
+  private periodMonthsFrom(
+    previousBill: BillEntity | null,
+    year: number,
+    month: number,
+  ): number {
+    if (!previousBill) return 1;
+
+    const gap =
+      this.monthIndex(year, month) -
+      this.monthIndex(previousBill.billing_year, previousBill.billing_month);
+
+    // คอลัมน์เป็น tinyint unsigned — บ้านที่หายไปนานกว่า 20 ปีคือข้อมูลผิด ไม่ใช่คาบบิล
+    if (!Number.isInteger(gap) || gap < 1) return 1;
+    return Math.min(gap, 255);
+  }
+
+  /** ห่างจากวันถ่ายเกินนี้ = รูปเก่า ไม่ใช่แค่นาฬิกากล้องเพี้ยน */
+  private static readonly STALE_PHOTO_DAYS = 30;
+
+  /**
+   * กันรูปเก่า/รูปใช้ซ้ำ — ตรวจสองชั้นจากข้อมูลที่มีอยู่แล้วในตาราง
+   *
+   * ═══ ชั้นที่ 1: captured_at ซ้ำเป๊ะ = ไฟล์เดียวกันแน่นอน ═══
+   *
+   * EXIF บันทึกเวลาถึงระดับวินาที การถ่ายสองครั้งได้วินาทีเดียวกันเป๊ะแทบเป็นไปไม่ได้
+   * ถ้าตรงกับแถวที่มีอยู่แล้ว แปลว่าเป็นไฟล์เดิมถูกอัปซ้ำ — **บล็อกตาย ไม่มีปุ่มยืนยัน**
+   * เพราะไม่มีสถานการณ์ที่ถูกต้องเลยที่จะเกิดเหตุการณ์นี้
+   *
+   * ═══ ชั้นที่ 2: พิกัดตรงกันทุกทศนิยม = น่าสงสัยแต่ไม่ฟันธง ═══
+   *
+   * GPS จริงไม่เคยให้ค่าเดิมเป๊ะทุกทศนิยมสองครั้ง (decimal(10,8) = ละเอียดระดับ 1 มม.)
+   * ถ้าเจอ แปลว่าค่านั้นถูกคัดลอกมา ไม่ได้วัดใหม่ — แต่เปิดปุ่มยืนยันไว้
+   * เผื่อหน้าเว็บ cache พิกัดไว้แล้วส่งค่าเดิมมาโดยที่คนถ่ายรูปใหม่จริง
+   *
+   * ตรวจข้ามทุกบ้าน ไม่ใช่แค่บ้านหลังนี้ — รูปที่ถูกยกไปใช้เป็นหลักฐานของบ้านอื่น
+   * คือเคสที่อันตรายกว่ารูปซ้ำของบ้านตัวเอง
+   */
+  private async assertPhotoNotReused(params: {
+    membersId: number;
+    latitude: number | null;
+    longitude: number | null;
+    captured_at: Date | null;
+    excludeReadingId?: number;
+    confirm_duplicate_location?: boolean;
+  }): Promise<void> {
+    const { latitude, longitude, captured_at } = params;
+
+    if (captured_at) {
+      const sameShot = await this.meterReadingRepository.findOne({
+        where: { captured_at },
+      });
+      if (sameShot && sameShot.id !== params.excludeReadingId) {
+        throw new ConflictException(
+          billError(
+            BILL_ERROR_CODES.PHOTO_REUSED,
+            `รูปนี้ถ่ายเมื่อ ${captured_at.toLocaleString('th-TH')} ซึ่งตรงกับการจดมิเตอร์ที่บันทึกไว้แล้ว (รหัสการจด ${sameShot.id}) — เป็นไฟล์รูปเดิมที่เคยใช้ไปแล้ว กรุณาถ่ายรูปหน้าปัดใหม่ครับ`,
+            409,
+          ),
+        );
+      }
+    }
+
+    if (
+      latitude === null ||
+      longitude === null ||
+      params.confirm_duplicate_location
+    ) {
+      return;
+    }
+
+    const samePlace = await this.meterReadingRepository.findOne({
+      where: { latitude, longitude },
+    });
+    if (samePlace && samePlace.id !== params.excludeReadingId) {
+      const owner =
+        samePlace.members_id === params.membersId
+          ? 'บ้านหลังเดียวกัน'
+          : `บ้านอีกหลัง (รหัส ${samePlace.members_id})`;
+      throw new ConflictException(
+        `พิกัดที่ส่งมาตรงกับการจดมิเตอร์ของ${owner}แบบเป๊ะทุกทศนิยม ซึ่ง GPS จริงไม่เคยให้ค่าเดิมซ้ำสองครั้ง — มักแปลว่าพิกัดถูกคัดลอกมา ไม่ได้วัดใหม่ตอนยืนหน้ามิเตอร์ กรุณากดวัดพิกัดใหม่ ถ้ายืนยันว่าถ่ายใหม่จริงให้กดยืนยันครับ`,
+      );
+    }
+  }
+
+  /**
+   * รูปที่ถ่ายไว้นานแล้วเอามาออกบิลรอบนี้
+   *
+   * ต่างจากคำเตือน "นาฬิกากล้องตั้งผิด" ของ ScanBatchService ตรงที่**ระดับความห่าง**:
+   * นาฬิกาที่ตั้งผิดมักคลาดเป็นชั่วโมงหรือ timezone (ไม่เกินวัน) ส่วนที่คลาดเป็นเดือน
+   * คือรูปเก่าจริง ๆ ซึ่งหมายถึงเลขบนหน้าปัดนั้นไม่ใช่เลขของวันนี้
+   *
+   * 409 ให้ยืนยัน ไม่บล็อกตาย เพราะจดค้างไว้แล้วมาออกบิลทีหลังก็เกิดขึ้นได้จริง
+   */
+  private assertPhotoNotStale(params: {
+    captured_at: Date | null;
+    reading_date: Date;
+    confirm_stale_photo?: boolean;
+  }): void {
+    if (!params.captured_at || params.confirm_stale_photo) return;
+
+    const gapDays = Math.abs(
+      (params.reading_date.getTime() - params.captured_at.getTime()) /
+        86_400_000,
+    );
+    if (gapDays > BillsService.STALE_PHOTO_DAYS) {
+      throw new ConflictException(
+        `รูปนี้ถ่ายเมื่อ ${params.captured_at.toLocaleDateString('th-TH')} ซึ่งห่างจากวันที่จดมิเตอร์ (${params.reading_date.toLocaleDateString('th-TH')}) ถึง ${Math.round(gapDays).toLocaleString('th-TH')} วัน — เลขบนหน้าปัดในรูปอาจไม่ใช่เลขของรอบนี้ กรุณาตรวจสอบว่าใช้รูปถูกใบ ถ้าถูกแล้วให้กดยืนยันครับ`,
+      );
+    }
+  }
+
   /**
    * ตรวจทุกเงื่อนไขและคำนวณยอด — **ไม่เขียนอะไรลงฐานข้อมูลเลย**
    *
@@ -695,6 +1085,8 @@ export class BillsService {
     confirm_digit_change?: boolean;
     old_meter_final_unit?: number;
     meter_digits?: number;
+    read_confidence?: number;
+    confirm_low_confidence?: boolean;
     excludeReadingId?: number;
   }) {
     // ตรวจเดือน/ปีก่อนทุกอย่าง — คิวรีหาบิลซ้ำและการเทียบลำดับเดือนข้างล่างพึ่งค่านี้ทั้งหมด
@@ -755,6 +1147,14 @@ export class BillsService {
       );
     }
 
+    // อ่านไม่ชัด = เลขอาจผิดตั้งแต่ต้น ตรวจก่อนด่านอื่นที่พึ่งตัวเลขนี้ทั้งหมด
+    // ด่านนี้จับเคสที่จำนวนหลักและหน่วยน้ำจับไม่ได้ (1250 → 1258)
+    const read_confidence = this.assertReadingConfident({
+      read_confidence: params.read_confidence,
+      current_unit: params.current_unit,
+      confirm_low_confidence: params.confirm_low_confidence,
+    });
+
     // จำนวนหลักผิด = เลขผิดตั้งแต่ต้น ตรวจก่อนเอาไปคำนวณอะไรทั้งสิ้น
     // ตัดการจดของเดือนที่กำลังจะทับออก ไม่งั้นจะไปเทียบกับค่าที่อ่านผิดของรอบก่อน
     const meter_digits = this.assertDigitsLookSane({
@@ -781,11 +1181,22 @@ export class BillsService {
       old_meter_final_unit: params.old_meter_final_unit,
     });
 
+    // เดือนที่ข้ามไปไม่มีบิล = บิลใบนี้กินหลายเดือน ต้องรู้ก่อนตรวจด่านหน่วยพุ่ง
+    // ไม่งั้นบิล 2 เดือนจะเด้ง 409 ทุกครั้งทั้งที่เลขถูก แล้วคนจะชินกับการกดผ่าน
+    const period_months = this.periodMonthsFrom(
+      baseline.bill,
+      period.year,
+      period.month,
+    );
+
     this.assertUsageLooksSane(
       usage_unit,
       otherBills,
       params.confirm_high_usage,
+      period_months,
     );
+
+    const due_date = await this.resolveDueDate(params.membersId, reading_date);
 
     return {
       rate,
@@ -796,6 +1207,10 @@ export class BillsService {
       meter_reset,
       // ตรวจแล้วว่าเป็นจำนวนเต็มบวก (หรือ null เมื่อกรอกมือ) ลงคอลัมน์ tinyint ได้เลย
       meter_digits,
+      // ปัดเป็น 3 ตำแหน่งแล้ว (หรือ null เมื่อกรอกมือ) ลงคอลัมน์ decimal(4,3) ได้เลย
+      read_confidence,
+      period_months,
+      due_date,
       // ผู้เรียกต้องบันทึกสองค่านี้ ไม่ใช่ค่าดิบจาก dto
       billing_month,
       billing_year,
@@ -877,10 +1292,30 @@ export class BillsService {
       confirm_digit_change: dto.confirm_digit_change,
       old_meter_final_unit: dto.old_meter_final_unit,
       meter_digits: dto.meter_digits,
+      read_confidence: dto.read_confidence,
+      confirm_low_confidence: dto.confirm_low_confidence,
     });
 
     // ตรวจพิกัดก่อนเขียนไฟล์รูป — ตกด่านนี้แล้วจะได้ไม่มีไฟล์ค้างให้ต้องตามลบ
     const location = this.parseLocation(dto);
+
+    // ด่านกันรูปเก่า/รูปใช้ซ้ำ — ต้องอยู่หลัง parseLocation (ใช้ค่าที่แปลงแล้ว)
+    // และก่อนเขียนไฟล์ ด้วยเหตุผลเดียวกับด่านพิกัด
+    this.assertPhotoNotStale({
+      captured_at: location.captured_at,
+      reading_date: prep.reading_date,
+      confirm_stale_photo: dto.confirm_stale_photo,
+    });
+
+    await this.assertPhotoNotReused({
+      membersId: dto.members_id,
+      latitude: location.latitude,
+      longitude: location.longitude,
+      captured_at: location.captured_at,
+      // ตอนกดจดทับ การจดของเดือนเดิมยังอยู่ในตาราง ถ้าไม่ตัดออกจะฟ้องว่าซ้ำกับตัวเอง
+      excludeReadingId: prep.existing?.meter_readings_id,
+      confirm_duplicate_location: dto.confirm_duplicate_location,
+    });
 
     // เขียนไฟล์รูปก่อนเข้าทรานแซกชัน — การเขียนดิสก์ย้อนกลับพร้อม rollback ไม่ได้
     // ถ้า DB ล้มทีหลังต้องตามลบไฟล์เอง (ดู catch ข้างล่าง) ไม่งั้นเหลือไฟล์ที่ไม่มีใครอ้างถึง
@@ -931,6 +1366,8 @@ export class BillsService {
               create_date: now,
               // ตรวจแล้วใน prepareBill() — null เมื่อกรอกเลขเอง ไม่ได้ผ่าน OCR
               meter_digits: prep.meter_digits,
+              // เก็บไว้เป็นหลักฐานว่าตอนออกบิลระบบมั่นใจแค่ไหน ไม่ใช่แค่ตรวจแล้วทิ้ง
+              read_confidence: prep.read_confidence,
               // รูปผูกกับ "การจดครั้งนี้" ไม่ใช่กับบิล เพราะบิลออกใหม่ทับได้
               // แต่การจดคือเหตุการณ์ที่เกิดครั้งเดียวและรูปเป็นหลักฐานของเหตุการณ์นั้น
               ...(photoPath ? { evidence_photo: photoPath } : {}),
@@ -950,6 +1387,8 @@ export class BillsService {
             // เติมศูนย์แล้วจาก prepareBill ไม่ใช่ค่าดิบจาก dto
             billing_month: prep.billing_month,
             billing_year: prep.billing_year,
+            due_date: prep.due_date,
+            period_months: prep.period_months,
             payment_status: 'Pending' as const,
             create_by: dto.create_by,
             create_date: now,
@@ -1046,7 +1485,7 @@ export class BillsService {
       );
     }
 
-    const { previous_unit } = await this.getPreviousUnit(
+    const { previous_unit, bill: previousBill } = await this.getPreviousUnit(
       reading.members_id,
       billing_month,
       billing_year,
@@ -1064,11 +1503,20 @@ export class BillsService {
     const usage_unit = createBillDto.current_unit - previous_unit;
 
     // 3.5 ด่านกันเลขที่ AI อ่านผิด — เคยมีบิลที่ 50,000 กลายเป็น 252,131 (3 ล้านบาท) หลุดไปแล้ว
-    //     เทียบกับค่าเฉลี่ยที่บ้านหลังนี้เคยใช้ บ้านใหม่ที่ยังไม่มีประวัติใช้เพดานตายตัวแทน
+    //     เทียบกับหน่วยที่บ้านหลังนี้ใช้ตามปกติ บ้านใหม่ที่ยังไม่มีประวัติใช้เพดานตายตัวแทน
+    //     หารด้วยคาบบิลก่อน ไม่งั้นบิลที่กินหลายเดือนจะเด้งทั้งที่เลขถูก
+    const period_months = this.periodMonthsFrom(previousBill, year, month);
+
     this.assertUsageLooksSane(
       usage_unit,
       otherBills,
       createBillDto.confirm_high_usage,
+      period_months,
+    );
+
+    const due_date = await this.resolveDueDate(
+      reading.members_id,
+      reading.reading_date,
     );
 
     const total_amount = usage_unit * Number(rate.price_per_unit);
@@ -1087,6 +1535,8 @@ export class BillsService {
       total_amount: total_amount, // เขียนทับด้วยยอดเงินที่ถูกต้อง
       billing_month, // เขียนทับด้วยค่าที่เติมศูนย์แล้ว ('8' → '08')
       billing_year,
+      due_date, // คิดจากวันจด + รอบชำระของหมู่บ้าน ไม่รับจาก body
+      period_months, // นับจากช่องว่างถึงบิลใบก่อน ไม่รับจาก body
       // 🌟 กำหนดค่าเองให้ชัดเจน กัน payment_status = NULL และ create_date = 0000-00-00
       payment_status: createBillDto.payment_status ?? 'Pending',
       create_date: new Date(),
@@ -1102,54 +1552,56 @@ export class BillsService {
   // getRawAndEntities() คืน raw เป็น any ถ้าไม่ระบุชนิด — ประกาศ BillDetailRow กำกับไว้
   // เพื่อให้ TypeScript จับได้เวลาพิมพ์ชื่อคอลัมน์ raw ผิด (เช่น member_housno)
   private billDetailQuery() {
-    return this.billRepository
-      .createQueryBuilder('bill')
-      .leftJoin(
-        MeterReadingEntity,
-        'reading',
-        'reading.id = bill.meter_readings_id',
-      )
-      .leftJoin(MemberEntity, 'member', 'member.id = reading.members_id')
-      .leftJoin(WaterRateEntity, 'rate', 'rate.id = bill.water_rates_id')
-      // ที่อยู่หมู่บ้านติดมากับบิลเลย เพราะบิลถูกพิมพ์จากทั้งฝั่งแอดมินและพอร์ทัลลูกบ้าน
-      // แต่ /villages เป็นสิทธิ์ admin ลูกบ้านจึงไปดึงเองไม่ได้ ถ้าไม่แนบมาตรงนี้
-      // ใบเสร็จของสองฝั่งจะมีที่อยู่ไม่เหมือนกัน
-      .leftJoin(VillageEntity, 'village', 'village.id = member.villages_id')
-      .leftJoin(
-        SubdistrictEntity,
-        'subdistrict',
-        'subdistrict.id = village.subdistricts_id',
-      )
-      .leftJoin(
-        DistrictEntity,
-        'district',
-        'district.id = village.districts_id',
-      )
-      .leftJoin(
-        ProvinceEntity,
-        'province',
-        'province.id = village.provinces_id',
-      )
-      .addSelect([
-        'reading.id',
-        'reading.reading_date',
-        'reading.meter_unit',
-        // path รูปหน้าปัด (สั้น ๆ ไม่กี่สิบตัวอักษร) ดึงมาพร้อมบิลได้ไม่หนัก
-        'reading.evidence_photo',
-        'member.id',
-        'member.house_no',
-        'member.fname',
-        'member.lname',
-        'member.phone',
-        'rate.price_per_unit',
-        'village.id',
-        'village.village_name',
-        'village.village_no',
-        'village.zip_code',
-        'subdistrict.name_in_thai',
-        'district.name_in_thai',
-        'province.name_in_thai',
-      ]);
+    return (
+      this.billRepository
+        .createQueryBuilder('bill')
+        .leftJoin(
+          MeterReadingEntity,
+          'reading',
+          'reading.id = bill.meter_readings_id',
+        )
+        .leftJoin(MemberEntity, 'member', 'member.id = reading.members_id')
+        .leftJoin(WaterRateEntity, 'rate', 'rate.id = bill.water_rates_id')
+        // ที่อยู่หมู่บ้านติดมากับบิลเลย เพราะบิลถูกพิมพ์จากทั้งฝั่งแอดมินและพอร์ทัลลูกบ้าน
+        // แต่ /villages เป็นสิทธิ์ admin ลูกบ้านจึงไปดึงเองไม่ได้ ถ้าไม่แนบมาตรงนี้
+        // ใบเสร็จของสองฝั่งจะมีที่อยู่ไม่เหมือนกัน
+        .leftJoin(VillageEntity, 'village', 'village.id = member.villages_id')
+        .leftJoin(
+          SubdistrictEntity,
+          'subdistrict',
+          'subdistrict.id = village.subdistricts_id',
+        )
+        .leftJoin(
+          DistrictEntity,
+          'district',
+          'district.id = village.districts_id',
+        )
+        .leftJoin(
+          ProvinceEntity,
+          'province',
+          'province.id = village.provinces_id',
+        )
+        .addSelect([
+          'reading.id',
+          'reading.reading_date',
+          'reading.meter_unit',
+          // path รูปหน้าปัด (สั้น ๆ ไม่กี่สิบตัวอักษร) ดึงมาพร้อมบิลได้ไม่หนัก
+          'reading.evidence_photo',
+          'member.id',
+          'member.house_no',
+          'member.fname',
+          'member.lname',
+          'member.phone',
+          'rate.price_per_unit',
+          'village.id',
+          'village.village_name',
+          'village.village_no',
+          'village.zip_code',
+          'subdistrict.name_in_thai',
+          'district.name_in_thai',
+          'province.name_in_thai',
+        ])
+    );
   }
 
   // รวมข้อมูลบิล + ลูกบ้าน + เรทค่าน้ำ ให้เป็นก้อนเดียวที่หน้าเว็บใช้ได้เลย
@@ -1197,8 +1649,36 @@ export class BillsService {
     };
   }
 
+  /**
+   * ดีดบิลที่เลยกำหนดชำระให้เป็น Overdue — เรียกก่อนอ่านรายการบิลทุกครั้ง
+   *
+   * ═══ ทำไมทำตอนอ่าน ไม่ใช่ cron ═══
+   *
+   * โปรเจกต์นี้ยังไม่มี scheduler และการเพิ่ม cron หมายถึงต้องมี process ที่รันค้าง
+   * ตลอดเวลา ซึ่งเป็นภาระเกินจำเป็นสำหรับหมู่บ้านเดียว การอัปเดตตอนอ่านให้ผลเหมือนกัน
+   * เพราะสถานะที่ไม่มีใครเปิดดูก็ไม่มีความหมาย และคิวรีนี้แตะเฉพาะแถวที่เข้าเงื่อนไข
+   * (มี index ที่ payment_status ก็ยิ่งถูก) จึงไม่ได้แพงจนต้องเลี่ยง
+   *
+   * ไม่แตะบิลที่ due_date เป็น NULL — บิลเก่าก่อน migration ไม่มีกำหนดชำระที่เชื่อได้
+   * และไม่แตะ 'Paid' เด็ดขาด จ่ายแล้วต่อให้จ่ายช้าก็คือจ่ายแล้ว
+   */
+  async markOverdue(): Promise<number> {
+    const result = await this.billRepository
+      .createQueryBuilder()
+      .update(BillEntity)
+      .set({ payment_status: 'Overdue' })
+      .where('payment_status = :pending', { pending: 'Pending' })
+      .andWhere('due_date IS NOT NULL')
+      .andWhere('due_date < CURDATE()')
+      .execute();
+
+    return result.affected ?? 0;
+  }
+
   // ดูบิลทั้งหมด (พร้อมข้อมูลลูกบ้านเจ้าของบิล)
   async findAll() {
+    await this.markOverdue();
+
     const { entities, raw } = await this.billDetailQuery()
       .orderBy('bill.create_date', 'DESC')
       .getRawAndEntities<BillDetailRow>();
@@ -1211,6 +1691,8 @@ export class BillsService {
   async findAllForMembers(memberIds: number[]) {
     if (memberIds.length === 0) return [];
 
+    await this.markOverdue();
+
     const { entities, raw } = await this.billDetailQuery()
       .where('member.id IN (:...memberIds)', { memberIds })
       .orderBy('bill.create_date', 'DESC')
@@ -1219,8 +1701,137 @@ export class BillsService {
     return entities.map((bill, index) => this.toDetail(bill, raw[index]));
   }
 
+  /**
+   * ยอดค้างสะสมรายบ้าน — เรียงบ้านที่ค้างหนักสุดขึ้นก่อน
+   *
+   * ของเดิมบ้านที่ค้าง 6 เดือนเห็นเป็นบิล Pending 6 ใบกระจายอยู่ในตารางรวม
+   * ต้องกวาดตาหาเองว่าเป็นของบ้านเดียวกัน แล้วบวกเลขในหัว — ซึ่งเป็นสิ่งที่
+   * คนเก็บเงินต้องทำทุกครั้งก่อนออกไปทวง
+   */
+  async outstandingByMember(villagesId?: number) {
+    await this.markOverdue();
+
+    const rows = await this.billRepository
+      .createQueryBuilder('bill')
+      .innerJoin(
+        MeterReadingEntity,
+        'reading',
+        'reading.id = bill.meter_readings_id',
+      )
+      .innerJoin(MemberEntity, 'member', 'member.id = reading.members_id1')
+      .select('member.id', 'members_id')
+      .addSelect('member.house_no', 'house_no')
+      .addSelect('member.fname', 'fname')
+      .addSelect('member.lname', 'lname')
+      .addSelect('member.phone', 'phone')
+      .addSelect('COUNT(bill.id)', 'unpaid_bills')
+      .addSelect('SUM(bill.total_amount)', 'outstanding_amount')
+      .addSelect('MIN(bill.due_date)', 'oldest_due_date')
+      .addSelect(
+        `SUM(CASE WHEN bill.payment_status = 'Overdue' THEN 1 ELSE 0 END)`,
+        'overdue_bills',
+      )
+      .where('bill.payment_status IN (:...unpaid)', {
+        unpaid: ['Pending', 'Overdue'],
+      })
+      .andWhere(
+        villagesId ? 'member.villages_id = :villagesId' : '1=1',
+        villagesId ? { villagesId } : {},
+      )
+      .groupBy('member.id')
+      .orderBy('outstanding_amount', 'DESC')
+      .getRawMany<{
+        members_id: number;
+        house_no: string;
+        fname: string | null;
+        lname: string | null;
+        phone: string | null;
+        unpaid_bills: string;
+        overdue_bills: string;
+        outstanding_amount: string;
+        oldest_due_date: Date | null;
+      }>();
+
+    // COUNT/SUM ของ MySQL กลับมาเป็น string ผ่าน getRawMany ต้องแปลงก่อนส่งออก
+    // ไม่งั้นหน้าเว็บเอาไปบวกกันจะได้การต่อสตริง ('120' + '80' = '12080')
+    return rows.map((row) => ({
+      members_id: Number(row.members_id),
+      house_no: row.house_no,
+      name: `${row.fname ?? ''} ${row.lname ?? ''}`.trim(),
+      phone: row.phone,
+      unpaid_bills: Number(row.unpaid_bills),
+      overdue_bills: Number(row.overdue_bills),
+      outstanding_amount: Number(row.outstanding_amount),
+      oldest_due_date: row.oldest_due_date,
+    }));
+  }
+
+  /**
+   * บ้านที่ยังไม่มีบิลของเดือนที่ระบุ — ไล่ดูว่าเดินจดตกบ้านไหนไปบ้าง
+   *
+   * ไม่มีตัวนี้ "เดือนที่ข้ามไป" จะไม่มีใครรู้จนกว่าจะไปโผล่เป็นบิลสองเดือนรวมกัน
+   * ในเดือนถัดไป ซึ่งตอนนั้นแก้อะไรไม่ได้แล้ว — ต้องรู้ตั้งแต่ยังอยู่ในเดือนนั้น
+   *
+   * `last_billed` บอกว่าบ้านหลังนี้มีบิลล่าสุดเมื่อไหร่ เพื่อแยกสองกรณีที่ต่างกันมาก:
+   * บ้านที่แค่ยังไม่ได้จดรอบนี้ กับบ้านที่หายไปจากระบบมาหลายเดือนแล้ว
+   */
+  async findMissingBills(
+    billing_month: string,
+    billing_year: string,
+    villagesId?: number,
+  ) {
+    const period = this.normalizeBillingPeriod(billing_month, billing_year);
+    const targetKey = this.monthKey(period.year, period.month);
+
+    const members = await this.memberRepository.find({
+      where: villagesId ? { villages_id: villagesId } : {},
+      order: { house_no: 'ASC' },
+    });
+    if (members.length === 0) return [];
+
+    const billsByMember = await this.billsOfMembers(members.map((m) => m.id));
+
+    const missing: {
+      members_id: number;
+      house_no: string;
+      name: string;
+      phone: string | null;
+      last_billed: string | null;
+      months_since_last_bill: number | null;
+    }[] = [];
+    for (const member of members) {
+      const bills = billsByMember.get(member.id) ?? [];
+      if (
+        bills.some(
+          (b) => this.monthKey(b.billing_year, b.billing_month) === targetKey,
+        )
+      ) {
+        continue;
+      }
+
+      // billsOfMembers เรียงเดือนเก่า→ใหม่มาแล้ว ใบท้ายสุดคือใบล่าสุด
+      const last = bills[bills.length - 1] ?? null;
+      missing.push({
+        members_id: member.id,
+        house_no: member.house_no,
+        name: `${member.fname ?? ''} ${member.lname ?? ''}`.trim(),
+        phone: member.phone ?? null,
+        last_billed: last ? `${last.billing_month}/${last.billing_year}` : null,
+        // ขาดไปกี่เดือนนับจากบิลล่าสุด — 1 คือแค่ยังไม่ได้จดรอบนี้
+        months_since_last_bill: last
+          ? this.monthIndex(period.year, period.month) -
+            this.monthIndex(last.billing_year, last.billing_month)
+          : null,
+      });
+    }
+
+    return missing;
+  }
+
   // ดูบิลตาม ID (พร้อมข้อมูลลูกบ้านเจ้าของบิล)
   async findOne(id: number) {
+    await this.markOverdue();
+
     const { entities, raw } = await this.billDetailQuery()
       .where('bill.id = :id', { id })
       .getRawAndEntities<BillDetailRow>();

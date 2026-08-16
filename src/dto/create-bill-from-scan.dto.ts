@@ -39,6 +39,15 @@ export class CreateBillFromScanDto {
   })
   meter_digits?: number;
 
+  @ApiPropertyOptional({
+    description:
+      'ความมั่นใจของหลักที่อ่อนที่สุดจาก OCR (ค่า confidence จาก /meter-readings/ocr-upload) — ' +
+      'ต่ำกว่า 0.85 ระบบจะขอให้กดยืนยันก่อน เพราะเป็นด่านเดียวที่จับเคส "อ่านผิดค่าโดยจำนวนหลักไม่เปลี่ยน" ' +
+      '(1250 → 1258) ซึ่งด่านจำนวนหลักและด่านหน่วยพุ่งจับไม่ได้ ไม่ส่งมา (กรอกเลขเอง) จะข้ามด่านนี้ไป',
+    example: 0.93,
+  })
+  read_confidence?: number;
+
   // ── พิกัดของจุดที่ยืนถ่ายรูป ────────────────────────────────────────────
   // ควรมาจาก navigator.geolocation.getCurrentPosition() ตอนกดชัตเตอร์
   // ไม่ใช่จาก EXIF เพราะหน้าเว็บย่อรูปด้วย canvas ก่อนส่ง EXIF จึงหายไปแล้ว
@@ -62,6 +71,30 @@ export class CreateBillFromScanDto {
     example: 12,
   })
   gps_accuracy_m?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'ยืนยันว่าพิกัดที่ตรงกับการจดครั้งก่อนเป๊ะทุกทศนิยมนั้นถ่ายใหม่จริง — ' +
+      'ปกติ GPS ไม่เคยให้ค่าเดิมซ้ำ ค่าที่ซ้ำจึงมักแปลว่าพิกัดถูกคัดลอกมาไม่ได้วัดใหม่ ' +
+      '(ถ้า captured_at ซ้ำด้วยจะบล็อกตาย ปุ่มนี้ช่วยไม่ได้ เพราะนั่นคือไฟล์เดิมแน่นอน)',
+    default: false,
+  })
+  confirm_duplicate_location?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'ยืนยันว่ารูปที่ถ่ายไว้นานกว่า 30 วันก่อนวันจดนั้นเป็นรูปที่ถูกต้องของรอบนี้',
+    default: false,
+  })
+  confirm_stale_photo?: boolean;
+
+  @ApiPropertyOptional({
+    description:
+      'ยืนยันว่าเลขที่ OCR อ่านได้ไม่ชัด (confidence ต่ำกว่า 0.85) นั้นตรงกับหน้าปัดจริง — ' +
+      'ให้คนตรวจเทียบทีละหลักกับรูปก่อนกด',
+    default: false,
+  })
+  confirm_low_confidence?: boolean;
 
   @ApiPropertyOptional({
     description: 'วันเวลาที่กดชัตเตอร์จริง (ISO 8601)',

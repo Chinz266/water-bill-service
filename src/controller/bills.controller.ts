@@ -95,6 +95,42 @@ export class BillsController {
     return await this.billsService.remove(+id);
   }
 
+  // ⚠️ ต้องอยู่ก่อน @Get(':id') ไม่งั้น 'outstanding' จะถูกจับเป็น id แล้วคิวรีเพี้ยน
+  @Get('outstanding')
+  @ApiOperation({
+    summary: 'ยอดค้างชำระสะสมรายบ้าน (เรียงบ้านที่ค้างหนักสุดขึ้นก่อน)',
+    description:
+      'รวมบิลที่ยังไม่จ่ายทุกใบของแต่ละบ้านเป็นยอดเดียว พร้อมจำนวนใบและวันครบกำหนดที่เก่าที่สุด\n\n' +
+      'เรียกแล้วจะดีดบิลที่เลยกำหนดเป็น Overdue ให้อัตโนมัติก่อนคิดยอด — ' +
+      'ไม่ต้องมีใครไปกดเปลี่ยนสถานะเองอีก',
+  })
+  async outstanding(@Query('villages_id') villagesId?: string) {
+    return await this.billsService.outstandingByMember(
+      villagesId ? +villagesId : undefined,
+    );
+  }
+
+  @Get('missing')
+  @ApiOperation({
+    summary: 'บ้านที่ยังไม่มีบิลของเดือนที่ระบุ (เดินจดตกบ้านไหนไปบ้าง)',
+    description:
+      'ถ้าไม่ไล่ดูตั้งแต่ยังอยู่ในเดือนนั้น เดือนที่ข้ามไปจะไปโผล่เป็นบิลสองเดือน' +
+      'รวมกันในเดือนถัดไป ซึ่งตอนนั้นย้อนกลับไปจดไม่ได้แล้ว\n\n' +
+      '`months_since_last_bill` แยกบ้านที่แค่ยังไม่ได้จดรอบนี้ (= 1) ' +
+      'ออกจากบ้านที่หายไปจากระบบหลายเดือนแล้ว',
+  })
+  async missing(
+    @Query('month') month: string,
+    @Query('year') year: string,
+    @Query('villages_id') villagesId?: string,
+  ) {
+    return await this.billsService.findMissingBills(
+      month,
+      year,
+      villagesId ? +villagesId : undefined,
+    );
+  }
+
   // ⚠️ ต้องอยู่ก่อน @Get(':id') ไม่งั้น 'member' จะถูกจับเป็น id แล้วคิวรีเพี้ยน
   @Get('member/:membersId/month')
   @ApiOperation({

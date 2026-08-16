@@ -39,6 +39,14 @@ export class MeterReadingEntity {
   @Column({ type: 'tinyint', nullable: true })
   meter_digits!: number | null;
 
+  // 🌟 ความมั่นใจของ "หลักที่อ่อนที่สุด" ที่ YOLO อ่านได้ (ไม่ใช่ค่าเฉลี่ย)
+  //    main.py คืนค่าแบบนี้อยู่แล้ว เพราะเลขมิเตอร์ผิดหลักเดียวก็ผิดทั้งจำนวน
+  //    ค่าเฉลี่ยจะกลบหลักที่ไม่ชัดจนมองไม่เห็น (สี่หลัก 0.99 + หนึ่งหลัก 0.41 = 0.87)
+  //    เก็บไว้เป็นหลักฐานย้อนหลังด้วย ไม่ใช่แค่ตรวจแล้วทิ้ง
+  //    NULL = กรอกเลขเอง ไม่ได้ผ่าน OCR (เหมือน meter_digits)
+  @Column({ type: 'decimal', precision: 4, scale: 3, nullable: true })
+  read_confidence!: number | null;
+
   // 🌟 ชื่อคอลัมน์จริงใน DB คือ members_id1 (มี 1 ต่อท้าย)
   @Column({ name: 'members_id1' })
   members_id!: number; // ID ของลูกบ้าน

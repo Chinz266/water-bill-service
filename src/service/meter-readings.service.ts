@@ -126,7 +126,11 @@ export class MeterReadingsService {
         integer_part: string | null;
         decimal_part: string | null;
         full_reading: string | null;
+        /** ความมั่นใจของหลักที่อ่อนที่สุด — ตัวที่เอาไปเป็นด่านจริง */
         confidence: number;
+        /** ค่าเฉลี่ยของทุกหลัก — ดูภาพรวมได้ แต่ห้ามเอามาเป็นด่าน (กลบหลักที่ไม่ชัด) */
+        confidence_avg?: number;
+        digit_count?: number;
         message: string;
       };
 
@@ -152,8 +156,14 @@ export class MeterReadingsService {
           // จำนวนหลักบนหน้าปัด นับจาก string ก่อนแปลงเป็นตัวเลข ไม่งั้นศูนย์นำหน้าหายไป
           // ใช้เทียบกับครั้งก่อนของบ้านเดียวกัน เพื่อจับเคส OCR อ่านหลักหาย/หลักเกิน
           meter_digits: this.countDigits(data.integer_part ?? data.read_unit),
-          // ส่ง confidence ต่อให้หน้าเว็บด้วย เอาไว้ทำแถบบอกว่าอ่านได้ชัดแค่ไหน
+          // 🌟 ค่านี้คือความมั่นใจของ "หลักที่อ่อนที่สุด" ไม่ใช่ค่าเฉลี่ย (main.py คืนมาแบบนี้)
+          //    เลขมิเตอร์ผิดหลักเดียวก็ผิดทั้งจำนวน ค่าเฉลี่ยจึงกลบหลักที่ไม่ชัดจนมองไม่เห็น
+          //    หน้าเว็บต้องส่งค่านี้ต่อไปกับ POST /bills/scan เป็น read_confidence
+          //    ไม่งั้นด่านที่จับ "อ่านผิดค่าโดยจำนวนหลักไม่เปลี่ยน" จะไม่ทำงานเลย
           confidence: data.confidence,
+          // ค่าเฉลี่ยกับจำนวนหลักที่โมเดลเห็น — ไว้โชว์ให้คนตรวจดูภาพรวม ไม่ใช่ด่าน
+          confidence_avg: data.confidence_avg ?? null,
+          digit_count: data.digit_count ?? null,
           photo_taken,
           message: 'สกัดค่าตัวเลขสำเร็จ',
         };

@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { MemberEntity } from '../entity/member.entity';
+import { VillageEntity } from '../entity/village.entity';
 import { BillsService } from './bills.service';
 import { MeterReadingsService } from './meter-readings.service';
 import { PhotoMetadata, PhotoMetadataService } from './photo-metadata.service';
@@ -16,7 +17,15 @@ export interface Candidate {
   name: string;
   previous_unit: number;
   usage_unit: number;
-  /** ค่าเฉลี่ยที่บ้านหลังนี้เคยใช้ (null = ยังไม่มีประวัติ) */
+  /**
+   * หน่วยที่บ้านหลังนี้ใช้ตามปกติ — median ของ 6 เดือนล่าสุด (null = ยังไม่มีประวัติ)
+   * คิดด้วย BillsService.usageBaseline() ตัวเดียวกับด่านตอนออกบิล
+   */
+  typical_usage: number | null;
+  /**
+   * @deprecated ชื่อเดิมของ typical_usage — ค่าเท่ากันเป๊ะ เก็บไว้ให้หน้าเว็บรุ่นเก่าไม่พัง
+   * เคยเป็นค่าเฉลี่ยของบิลทุกใบจริง ๆ แต่เปลี่ยนเป็น median 6 เดือนแล้ว (ดู usageBaseline)
+   */
   average_usage: number | null;
   already_billed: boolean;
   /** 0-1 ยิ่งสูงยิ่งเข้าเค้า */
@@ -26,6 +35,11 @@ export interface Candidate {
    * null = รูปไม่มีพิกัด หรือบ้านหลังนี้ยังไม่ได้กรอกพิกัดไว้
    */
   distance_m: number | null;
+  /**
+   * การกระจายของพิกัดที่เคยไปจดบ้านหลังนี้ (MAD เป็นเมตร)
+   * null = ยังมีประวัติไม่พอ (< 3 ครั้ง) ให้ใช้รัศมีค่ากลางแทน
+   */
+  spread_m: number | null;
 }
 
 /** ผลการวิเคราะห์รูปหนึ่งใบ */
@@ -74,9 +88,9 @@ export interface ScanBatchItem {
  *   1. ห้ามติดลบ  — มิเตอร์เดินหน้าอย่างเดียว เลขใหม่ต้อง ≥ เลขตั้งต้นของบ้านนั้น
  *   2. หน่วยที่ใช้ต้องสมเหตุสมผล — เทียบกับที่บ้านหลังนั้นเคยใช้จริง
  *
- * GPS ทำแบบนี้ไม่ได้ เพราะบ้านในหมู่บ้านห่างกัน 8-20 เมตร ขณะที่ GPS มือถือ
- * คลาดเคลื่อน 10-30 เมตรเป็นปกติ รัศมีที่กว้างพอจะไม่ปฏิเสธคนถ่ายถูกบ้าน
- * ย่อมครอบบ้านข้างเคียงไปด้วยเสมอ
+ * GPS ทำแบบนี้ไม่ได้ เพราะมิเตอร์ห่างกัน 4-20 เมตร (ทาวน์โฮม 4-8, บ้านเดี่ยว 5-20)
+ * ขณะที่ GPS มือถือคลาดเคลื่อน 10-30 เมตรเป็นปกติ รัศมีที่กว้างพอจะไม่ปฏิเสธ
+ * คนถ่ายถูกบ้าน ย่อมครอบบ้านข้างเคียงไปด้วยเสมอ
  *
  * ═══ สิ่งที่ service นี้ไม่ทำ ═══
  *
@@ -93,11 +107,59 @@ export class ScanBatchService {
 
   /**
    * ระยะที่ถือว่า "ถ่ายอยู่ที่บ้านหลังนี้จริง"
-   * GPS มือถือคลาดเคลื่อน 10-30 ม. เป็นปกติ จึงตั้งไว้กว้างกว่านั้นเล็กน้อย
+   *
+   * ค่านี้เป็นคำถามเรื่อง "ความแม่นของ GPS" ไม่ใช่ "ความหนาแน่นของหมู่บ้าน"
+   * จึงคงที่ทั้งระบบ ไม่ผูกกับ meter_pitch_m: จุดอ้างอิงตอนลงทะเบียนคลาดได้ 20 ม.
+   * (MemberService.MAX_ACCEPTABLE_ACCURACY_M) ตอนถ่ายจริงคลาดได้อีก ~30 ม.
+   * รวมกันเป็น √(20² + 30²) ≈ 36 ม. — ตั้ง 50 ไว้เผื่อขอบบนพอดี
+   * ถ้าหดตามหมู่บ้านหนาแน่น จะกลายเป็นปฏิเสธคนที่ถ่ายถูกบ้านแทน
    */
   static readonly GPS_NEAR_M = 50;
-  /** ไกลเกินนี้ถือว่าน่าสงสัย — บ้านในหมู่บ้านห่างกันแค่ 8-20 ม. */
-  static readonly GPS_FAR_M = 150;
+
+  /**
+   * ระยะเดินเฉลี่ยต่อ 1 มิเตอร์ ที่ใช้เมื่อหมู่บ้านยังไม่ได้กรอก `meter_pitch_m`
+   * 15 ม. คือค่าขอบบนของหมู่บ้านชนบท — เลือกค่านี้เพราะคูณแล้วได้ 150 ม.
+   * ซึ่งเท่ากับค่าคงที่เดิมพอดี หมู่บ้านที่ยังไม่กรอกจึงไม่มีพฤติกรรมเปลี่ยน
+   */
+  static readonly DEFAULT_METER_PITCH_M = 15;
+
+  /**
+   * ไกลเกิน `pitch × ตัวคูณนี้` ถือว่าน่าสงสัย
+   *
+   * ═══ ทำไมต้องผูกกับความหนาแน่น ไม่ใช่ค่าคงที่ ═══
+   *
+   * รัศมี R ครอบบ้านราว `2 × (2R / pitch)` หลัง (บ้านเรียงสองฝั่งถนน) ค่าคงที่ 150 ม.
+   * จึงให้ผลต่างกันคนละเรื่องระหว่างหมู่บ้านสองแบบ ในหมู่บ้าน 150 หลังคาเรือน:
+   *
+   *   - ชนบท pitch 15 ม. → ~40 หลัง (27% ของหมู่บ้าน) เป็นด่านที่ตัดได้จริง
+   *   - ทาวน์โฮม pitch 6 ม. → ~100 หลัง (67%) แทบไม่ได้ตัดอะไรทิ้งเลย
+   *
+   * ตัวคูณ 10 = "ห่างเกินสิบหลังคาเรือน" ซึ่งเป็นระยะที่คนเดินจดพลาดไปไกลจริง ๆ
+   * ไม่ใช่แค่ GPS เพี้ยน — อ่านแล้วเข้าใจได้โดยไม่ต้องรู้ค่ารัศมีเป็นเมตร
+   */
+  static readonly GPS_FAR_PITCH_MULTIPLIER = 10;
+
+  /**
+   * ขอบล่างของรัศมี "ไกลจนน่าสงสัย" — ต้องห่างจาก GPS_NEAR_M พอสมควร
+   * ไม่งั้น gpsTiebreak จะตัดสินจากช่องว่างที่แคบกว่าความคลาดเคลื่อนของ GPS เอง
+   * (ตึกแถว pitch 4 ม. คูณ 10 ได้ 40 ม. ซึ่งต่ำกว่า GPS_NEAR_M ด้วยซ้ำ)
+   */
+  static readonly GPS_FAR_MIN_M = 80;
+  /** ขอบบน = ค่าคงที่เดิม กันไม่ให้บ้านสวนที่ pitch สูงกลายเป็นไม่เตือนอะไรเลย */
+  static readonly GPS_FAR_MAX_M = 150;
+
+  /** รัศมี "ไกลจนน่าสงสัย" ของหมู่บ้านหนึ่ง — pitch เป็น null ได้ (ยังไม่ได้กรอก) */
+  static farThresholdFor(pitch: number | null | undefined): number {
+    const effective =
+      pitch && pitch > 0 ? pitch : ScanBatchService.DEFAULT_METER_PITCH_M;
+    return Math.min(
+      ScanBatchService.GPS_FAR_MAX_M,
+      Math.max(
+        ScanBatchService.GPS_FAR_MIN_M,
+        effective * ScanBatchService.GPS_FAR_PITCH_MULTIPLIER,
+      ),
+    );
+  }
 
   /**
    * ตัวคูณลดคะแนนของบ้านที่มีบิลเดือนนี้ไปแล้ว
@@ -114,6 +176,8 @@ export class ScanBatchService {
   constructor(
     @InjectRepository(MemberEntity)
     private readonly memberRepository: Repository<MemberEntity>,
+    @InjectRepository(VillageEntity)
+    private readonly villageRepository: Repository<VillageEntity>,
     private readonly meterReadingsService: MeterReadingsService,
     private readonly billsService: BillsService,
     private readonly photoMetadataService: PhotoMetadataService,
@@ -141,6 +205,19 @@ export class ScanBatchService {
 
     const memberIds = members.map((m) => m.id);
 
+    // รัศมี "ไกลจนน่าสงสัย" ขึ้นกับความหนาแน่นของหมู่บ้านที่กำลังสแกน
+    // ไม่ระบุหมู่บ้านมา = ชุดนี้อาจคละหลายหมู่บ้าน ใช้ค่ากลาง (= รัศมีกว้างสุด)
+    // เพราะรัศมีที่แคบเกินจริงจะทำให้ gpsTiebreak กล้าตัดสินแทนคนบ่อยขึ้น
+    const farM = ScanBatchService.farThresholdFor(
+      dto.villages_id
+        ? ((
+            await this.villageRepository.findOne({
+              where: { id: dto.villages_id },
+            })
+          )?.meter_pitch_m ?? null)
+        : null,
+    );
+
     // previousUnitsForMembers ตรวจเดือน/ปีให้ด้วย และใช้กฎเลขตั้งต้นชุดเดียวกับตอนออกบิลจริง
     const baseline = await this.billsService.previousUnitsForMembers(
       memberIds,
@@ -155,6 +232,14 @@ export class ScanBatchService {
     // จำนวนหลักบนหน้าปัดของแต่ละบ้าน — ใช้เตือนเมื่อ OCR อ่านหลักหาย/เกิน
     const knownDigits = this.billsService.knownMeterDigits(readings);
 
+    // เวลากดชัตเตอร์ของทุกรูปที่เคยใช้ออกบิลไปแล้ว — ใช้จับรูปเดิมที่ถูกอัปซ้ำ
+    // เก็บเป็น epoch ms เพราะ Date คนละ instance เทียบด้วย Set ตรง ๆ ไม่ได้
+    const usedCaptureTimes = new Set(
+      readings
+        .map((r) => (r.captured_at ? new Date(r.captured_at).getTime() : null))
+        .filter((t): t is number => t !== null),
+    );
+
     // OCR ทีละใบตามลำดับ ไม่ยิงขนานเพราะ vision service โหลดโมเดลตัวเดียว
     // ยิงพร้อมกัน 30 ใบมีแต่จะแย่ง GPU/CPU กันเองแล้วช้ากว่าเดิม
     const results: ScanBatchItem[] = [];
@@ -167,7 +252,9 @@ export class ScanBatchService {
           baseline,
           learned,
           knownDigits,
+          usedCaptureTimes,
           dto,
+          farM,
         ),
       );
     }
@@ -250,12 +337,27 @@ export class ScanBatchService {
     baseline: Awaited<ReturnType<BillsService['previousUnitsForMembers']>>,
     learned: ReturnType<BillsService['learnedMeterLocations']>,
     knownDigits: ReturnType<BillsService['knownMeterDigits']>,
+    /** epoch ms ของ captured_at ทุกรูปที่เคยใช้ออกบิลไปแล้ว */
+    usedCaptureTimes: Set<number>,
     dto: ScanBatchDto,
+    /** รัศมี "ไกลจนน่าสงสัย" ของหมู่บ้านที่กำลังสแกน — ดู farThresholdFor() */
+    farM: number,
   ): Promise<ScanBatchItem> {
     // อ่าน EXIF จาก buffer ต้นฉบับก่อนใคร — ต้องมาก่อน OCR ด้วย
     // เพราะถ้า vision service ล่ม อย่างน้อยวันเวลาและพิกัดยังได้ติดมือกลับไป
     const photo_taken = this.photoMetadataService.read(file.buffer);
     const warnings = this.checkCaptureDate(photo_taken, dto);
+
+    // รูปใบนี้เคยถูกใช้ออกบิลไปแล้วหรือยัง — เตือนตั้งแต่ตรงนี้ ไม่ต้องรอไปโดน
+    // บล็อกตอนกดยืนยัน คนจะได้เห็นตั้งแต่ยังดูรูปทั้งชุดอยู่ว่าใบไหนหยิบผิด
+    if (
+      photo_taken.captured_at &&
+      usedCaptureTimes.has(photo_taken.captured_at.getTime())
+    ) {
+      warnings.push(
+        `รูปนี้ถ่ายเมื่อ ${photo_taken.captured_at.toLocaleString('th-TH')} ซึ่งตรงกับการจดมิเตอร์ที่บันทึกไว้แล้ว — เป็นไฟล์รูปเดิมที่เคยใช้ไปแล้ว จะออกบิลจากรูปนี้ไม่ได้`,
+      );
+    }
 
     // vision service ล่มไม่ควรทำให้ทั้งชุด 30 รูปพังตามไปด้วย
     // ใบที่อ่านไม่ได้ให้ตกไปเป็น 'none' แล้วเดินหน้าใบถัดไปต่อ
@@ -310,14 +412,12 @@ export class ScanBatchService {
       meterUnit,
       candidates,
       photo_taken,
+      farM,
     );
 
     const suggestion =
       confidence === 'ambiguous' ? null : (candidates[0] ?? null);
-    if (
-      suggestion?.distance_m != null &&
-      suggestion.distance_m > ScanBatchService.GPS_FAR_M
-    ) {
+    if (suggestion?.distance_m != null && suggestion.distance_m > farM) {
       warnings.push(
         `จุดที่ถ่ายรูปห่างจากพิกัดบ้าน ${suggestion.house_no} ประมาณ ${Math.round(suggestion.distance_m).toLocaleString('th-TH')} เมตร กรุณาตรวจสอบว่าใช่บ้านหลังนี้จริง`,
       );
@@ -343,13 +443,26 @@ export class ScanBatchService {
       }
     }
 
+    // OCR อ่านผิดค่าโดยจำนวนหลักไม่เปลี่ยน (1250 → 1258) เป็นเคสที่ด่านอื่นจับไม่ได้เลย
+    // ตัวเดียวที่จับได้คือ confidence ของหลักที่อ่อนที่สุด ซึ่ง vision service ส่งมาให้แล้ว
+    // ตรงนี้เตือนล่วงหน้า ส่วนด่านที่บล็อกจริงอยู่ที่ BillsService ตอนกดยืนยัน
+    const readConfidence = reading?.confidence ?? 0;
+    if (
+      readConfidence > 0 &&
+      readConfidence < BillsService.MIN_READ_CONFIDENCE
+    ) {
+      warnings.push(
+        `ระบบอ่านเลขได้ไม่ชัด (หลักที่ไม่ชัดที่สุดมั่นใจ ${Math.round(readConfidence * 100)}%) กรุณาเทียบเลข ${meterUnit.toLocaleString('th-TH')} กับรูปหน้าปัดทีละหลักก่อนยืนยันครับ`,
+      );
+    }
+
     return {
       index,
       filename: file.originalname,
       reading: {
         success: true,
         meter_unit: meterUnit,
-        confidence: reading?.confidence ?? 0,
+        confidence: readConfidence,
         // เก็บเลขดิบไว้ให้คนตรวจย้อนได้ว่าโมเดลเห็นทศนิยมด้วยไหม
         full_reading: reading?.full_reading ?? null,
         meter_digits: reading?.meter_digits ?? null,
@@ -419,13 +532,11 @@ export class ScanBatchService {
       const usage_unit = meterUnit - base.previous_unit;
       if (usage_unit < 0) continue; // เป็นไปไม่ได้ ตัดทิ้ง
 
-      const history = base.usage_history;
-      const average_usage =
-        history.length > 0
-          ? history.reduce((sum, u) => sum + u, 0) / history.length
-          : null;
+      // ใช้ค่าที่ BillsService คิดมาให้แล้ว ไม่คำนวณเองซ้ำ — เกณฑ์ของหน้านี้กับ
+      // ด่านตอนกดยืนยันต้องเป็นสูตรเดียวกันเป๊ะ ไม่งั้นจะเสนอบ้านที่พอกดจริงแล้วโดน 409
+      const typical_usage = base.typical_usage;
 
-      const rawScore = this.scoreUsage(usage_unit, average_usage);
+      const rawScore = this.scoreUsage(usage_unit, typical_usage);
       if (rawScore <= 0) continue; // เกินเพดานจนไม่สมเหตุสมผล
 
       // บ้านที่ออกบิลเดือนนี้ไปแล้วยังเป็นตัวเลือกได้ (จดผิดแล้วมาแก้เป็นเรื่องปกติ)
@@ -440,11 +551,14 @@ export class ScanBatchService {
         name: `${member.fname ?? ''} ${member.lname ?? ''}`.trim(),
         previous_unit: base.previous_unit,
         usage_unit,
+        typical_usage:
+          typical_usage === null ? null : Math.round(typical_usage * 10) / 10,
         average_usage:
-          average_usage === null ? null : Math.round(average_usage * 10) / 10,
+          typical_usage === null ? null : Math.round(typical_usage * 10) / 10,
         already_billed: base.already_billed,
         score: Math.round(score * 1000) / 1000,
         distance_m: this.distanceTo(photo, member, learned.get(member.id)),
+        spread_m: learned.get(member.id)?.spread_m ?? null,
       });
     }
 
@@ -491,8 +605,8 @@ export class ScanBatchService {
    * เกณฑ์ตัดใช้ค่าเดียวกับ assertUsageLooksSane ของ BillsService เป๊ะ ๆ
    * ไม่งั้นหน้านี้จะเสนอบ้านที่พอกดยืนยันจริงแล้วโดนตีกลับเป็น 409
    */
-  private scoreUsage(usage_unit: number, average_usage: number | null): number {
-    if (average_usage === null) {
+  private scoreUsage(usage_unit: number, typical_usage: number | null): number {
+    if (typical_usage === null) {
       // บ้านใหม่ยังไม่มีประวัติ — ตัดสินได้แค่ว่าไม่เกินเพดานตายตัว
       // ให้คะแนนต่ำไว้ตลอด เพราะไม่มีอะไรยืนยันว่าเป็นบ้านนี้จริง
       if (usage_unit > BillsService.USAGE_HARD_CAP) return 0;
@@ -500,14 +614,14 @@ export class ScanBatchService {
     }
 
     const spikeLimit = Math.max(
-      average_usage * BillsService.USAGE_SPIKE_RATIO,
+      typical_usage * BillsService.USAGE_SPIKE_RATIO,
       BillsService.USAGE_SPIKE_FLOOR,
     );
     if (usage_unit > spikeLimit) return 0;
 
-    // ยิ่งใกล้ค่าเฉลี่ยยิ่งได้คะแนนสูง — ห่างเท่าค่าเฉลี่ยพอดีได้ 0.5
-    const distance = Math.abs(usage_unit - average_usage);
-    return 1 / (1 + distance / Math.max(average_usage, 1));
+    // ยิ่งใกล้ค่าปกติยิ่งได้คะแนนสูง — ห่างเท่าค่าปกติพอดีได้ 0.5
+    const distance = Math.abs(usage_unit - typical_usage);
+    return 1 / (1 + distance / Math.max(typical_usage, 1));
   }
 
   /** ตัดสินว่ามั่นใจแค่ไหน พร้อมเหตุผลภาษาไทยให้คนอ่านเข้าใจ */
@@ -515,6 +629,7 @@ export class ScanBatchService {
     meterUnit: number,
     candidates: Candidate[],
     photo: PhotoMetadata,
+    farM: number,
   ): { confidence: MatchConfidence; reason: string } {
     if (candidates.length === 0) {
       return {
@@ -528,9 +643,9 @@ export class ScanBatchService {
 
     if (!clearlyAhead) {
       // เลขมิเตอร์แยกไม่ออก — ลองใช้พิกัดช่วยตัด
-      // ให้ได้แค่ medium เท่านั้น เพราะ GPS แยกบ้านที่ห่างกัน 8-20 เมตรไม่ได้จริง
+      // ให้ได้แค่ medium เท่านั้น เพราะ GPS แยกมิเตอร์ที่ห่างกัน 4-20 เมตรไม่ได้จริง
       // ใช้ได้แค่ตอนที่ "ใกล้ชัด ๆ กับหลังหนึ่ง และไกลชัด ๆ จากอีกหลัง"
-      const nearest = this.gpsTiebreak(top, second);
+      const nearest = this.gpsTiebreak(top, second, farM);
       if (nearest) {
         return {
           confidence: 'medium',
@@ -565,22 +680,64 @@ export class ScanBatchService {
   }
 
   /**
+   * ความคลาดเคลื่อนรวมของการวัดระยะหนึ่งครั้ง (เมตร)
+   *
+   * จุดอ้างอิงคลาดได้ 20 ม. (MemberService.MAX_ACCEPTABLE_ACCURACY_M)
+   * จุดที่ถ่ายจริงคลาดได้อีก ~30 ม. — ความคลาดเคลื่อนอิสระบวกกันแบบ RSS ไม่ใช่ตรง ๆ
+   * √(20² + 30²) ≈ 36 ม.
+   *
+   * ระยะสองค่าที่ต่างกันน้อยกว่านี้ = แยกไม่ออกจริง ไม่ใช่ "หลังหนึ่งใกล้กว่า"
+   */
+  static readonly GPS_COMBINED_ERROR_M = 36;
+
+  /**
+   * รัศมี "ถ่ายอยู่ที่บ้านหลังนี้จริง" เฉพาะของบ้านหนึ่ง
+   *
+   * บ้านที่มีประวัติการจดพอจะรู้การกระจายของตัวเอง (spread_m = MAD) ให้ใช้ 2×MAD
+   * ซึ่งครอบราว 3 ใน 4 ของครั้งที่เคยไปจริง — แคบกว่าค่ากลางมากสำหรับมิเตอร์
+   * กลางทุ่งที่ GPS นิ่ง และไม่ปล่อยให้หลวมเกิน GPS_NEAR_M สำหรับมิเตอร์ใต้ชายคา
+   *
+   * ขอบล่างที่ GPS_COMBINED_ERROR_M เพราะรัศมีที่แคบกว่าความคลาดเคลื่อนของ
+   * การวัดครั้งเดียว จะปฏิเสธคนที่ถ่ายถูกบ้าน ซึ่งแย่กว่าการไม่ตัดสิน
+   */
+  private nearLimitFor(candidate: Candidate): number {
+    if (candidate.spread_m === null) return ScanBatchService.GPS_NEAR_M;
+    return Math.min(
+      ScanBatchService.GPS_NEAR_M,
+      Math.max(ScanBatchService.GPS_COMBINED_ERROR_M, candidate.spread_m * 2),
+    );
+  }
+
+  /**
    * ใช้พิกัดตัดสินระหว่างสองบ้านที่เลขมิเตอร์แยกไม่ออก
    *
-   * ยอมตัดสินเฉพาะตอนที่ผลต่างชัดจริง — หลังหนึ่งอยู่ในระยะ 50 ม.
-   * ขณะที่อีกหลังไกลเกิน 150 ม. ถ้าทั้งคู่อยู่ในระยะใกล้พอ ๆ กัน (ซึ่งเป็นเรื่องปกติ
-   * เพราะบ้านในหมู่บ้านห่างกันแค่ 8-20 ม.) ต้องคืน null ให้คนเลือกเอง
-   * ไม่งั้นจะกลายเป็นการเดาที่ดูน่าเชื่อถือทั้งที่ไม่มีข้อมูลพอ
+   * ยอมตัดสินก็ต่อเมื่อผ่านครบ **สามข้อ** ซึ่งตอบคนละคำถามกัน:
+   *
+   *   1. `d₁ ≤ nearLimit(top)` — ใกล้พอจะเป็นบ้านหลังนี้จริง (ดู nearLimitFor)
+   *   2. `d₂ > farM`           — อีกหลังไกลเกินความหนาแน่นของหมู่บ้านนี้
+   *   3. `d₂ - d₁ > 36 ม.`     — ช่องว่างกว้างกว่าความคลาดเคลื่อนของการวัดเอง
+   *
+   * ข้อ 3 สำคัญที่สุด: ถ้าไม่มี ระยะ 45 ม. กับ 52 ม. จะถูกตีความว่า "หลังแรกใกล้กว่า"
+   * ทั้งที่ต่างกัน 7 ม. ซึ่งน้อยกว่าความคลาดเคลื่อนของการวัดครั้งเดียวหลายเท่า
+   * — วัดใหม่อีกรอบอันดับอาจสลับกันเลย
+   *
+   * ทั้งคู่ใกล้พอ ๆ กัน (เรื่องปกติ เพราะมิเตอร์ห่างกันแค่ 4-20 ม.) ต้องคืน null
+   * ให้คนเลือกเอง ไม่งั้นจะกลายเป็นการเดาที่ดูน่าเชื่อถือทั้งที่ข้อมูลไม่พอ
    */
-  private gpsTiebreak(a: Candidate, b: Candidate): Candidate | null {
+  private gpsTiebreak(
+    a: Candidate,
+    b: Candidate,
+    farM: number,
+  ): Candidate | null {
     if (a.distance_m === null || b.distance_m === null) return null;
 
     const [near, far] =
       a.distance_m <= b.distance_m ? [a, b] : ([b, a] as const);
 
     if (
-      near.distance_m! <= ScanBatchService.GPS_NEAR_M &&
-      far.distance_m! > ScanBatchService.GPS_FAR_M
+      near.distance_m! <= this.nearLimitFor(near) &&
+      far.distance_m! > farM &&
+      far.distance_m! - near.distance_m! > ScanBatchService.GPS_COMBINED_ERROR_M
     ) {
       return near;
     }

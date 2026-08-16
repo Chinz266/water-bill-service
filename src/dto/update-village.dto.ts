@@ -68,4 +68,12 @@ export class UpdateVillageDto {
     example: 'EVERY_MONTH',
   })
   billing_month?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'ระยะเดินเฉลี่ยต่อ 1 มิเตอร์ เป็นเมตร — ชนบท/บ้านเดี่ยว 10-15, ทาวน์โฮม 4-8 ' +
+      '(ส่ง null มาเพื่อกลับไปใช้ค่ากลาง 15 ได้) รับได้ 2-60',
+    example: 12,
+  })
+  meter_pitch_m?: number | null;
 }

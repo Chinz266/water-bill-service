@@ -55,6 +55,14 @@ export class CreateVillageDto {
   })
   phone?: string;
 
+  @ApiPropertyOptional({
+    description:
+      'ระยะเดินเฉลี่ยต่อ 1 มิเตอร์ เป็นเมตร — ชนบท/บ้านเดี่ยว 10-15, ทาวน์โฮม 4-8 ' +
+      '(ไม่กรอก = ใช้ค่ากลาง 15) ใช้คำนวณรัศมีเตือน "ถ่ายห่างจากบ้านเกินไป" ตอนสแกนมิเตอร์',
+    example: 12,
+  })
+  meter_pitch_m?: number;
+
   @ApiProperty({
     description: 'ID ของ Admin ที่เป็นคนบันทึกข้อมูล',
     example: 1,

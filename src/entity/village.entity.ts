@@ -43,6 +43,18 @@ export class VillageEntity {
   @Column({ length: 45, default: 'EVERY_MONTH' })
   billing_month!: string;
 
+  // ระยะเดินเฉลี่ยต่อ 1 มิเตอร์ (เมตร) — ScanBatchService ใช้คำนวณรัศมีที่ถือว่า
+  // "ไกลจนน่าสงสัย" หมู่บ้านหนาแน่นต่างกันมาก รัศมีคงที่ทั้งระบบจึงหลวมเกินไป
+  // สำหรับทาวน์โฮม NULL = ใช้ค่ากลาง ดู db/migrate-village-meter-pitch.sql
+  @Column({ type: 'smallint', unsigned: true, nullable: true })
+  meter_pitch_m!: number | null;
+
+  // ให้เวลาชำระกี่วันนับจากวันจดมิเตอร์ — แต่ละหมู่บ้านเก็บเงินคนละรอบ
+  // (บางที่เก็บวันประชุมประจำเดือน บางที่ให้ไปจ่ายเมื่อไหร่ก็ได้)
+  // NULL = ใช้ค่ากลาง BillsService.DEFAULT_PAYMENT_DUE_DAYS
+  @Column({ type: 'smallint', unsigned: true, nullable: true })
+  payment_due_days!: number | null;
+
   @Column()
   create_by!: number;
 

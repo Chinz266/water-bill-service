@@ -97,6 +97,22 @@ export class VillagesService {
       patch.zip_code = zip as string;
     }
 
+    // ระยะเดินต่อมิเตอร์เกินช่วงจริงจะทำให้รัศมีเตือนเพี้ยนไปทั้งหมู่บ้าน:
+    // ต่ำเกินไปรัศมีจะแคบจนเตือนแม้ถ่ายถูกบ้าน สูงเกินไปก็ไม่เตือนอะไรเลย
+    // ช่วง 2-60 กว้างพอสำหรับตั้งแต่ตึกแถวจนถึงบ้านสวนที่ห่างกันมาก
+    if (dto.meter_pitch_m !== undefined) {
+      const pitch = dto.meter_pitch_m;
+      if (pitch === null) {
+        patch.meter_pitch_m = null; // กลับไปใช้ค่ากลางของระบบ
+      } else if (!Number.isInteger(pitch) || pitch < 2 || pitch > 60) {
+        throw new UnprocessableEntityException(
+          'ระยะเดินเฉลี่ยต่อมิเตอร์ต้องเป็นจำนวนเต็ม 2-60 เมตร',
+        );
+      } else {
+        patch.meter_pitch_m = pitch;
+      }
+    }
+
     patch.modify_by = modifiedBy;
 
     const merged = this.villageRepository.merge(village, patch);

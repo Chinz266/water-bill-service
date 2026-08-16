@@ -9,6 +9,8 @@ import { MeterPhotoService } from './meter-photo.service';
 import { BillEntity } from '../entity/bill.entity';
 import { WaterRateEntity } from '../entity/water-rate.entity';
 import { MeterReadingEntity } from '../entity/meter-reading.entity';
+import { MemberEntity } from '../entity/member.entity';
+import { VillageEntity } from '../entity/village.entity';
 import { CreateBillFromScanDto } from '../dto/create-bill-from-scan.dto';
 
 /**
@@ -41,6 +43,8 @@ describe('BillsService — ด่านตรวจก่อนออกบิ�
     manager: { transaction: jest.Mock };
   };
   let meterReadingRepository: { find: jest.Mock; findOne: jest.Mock };
+  let memberRepository: { find: jest.Mock; findOne: jest.Mock };
+  let villageRepository: { findOne: jest.Mock };
   let photoService: { remove: jest.Mock; save: jest.Mock };
 
   beforeEach(() => {
@@ -83,6 +87,12 @@ describe('BillsService — ด่านตรวจก่อนออกบิ�
       find: jest.fn().mockResolvedValue([]),
       findOne: jest.fn().mockResolvedValue(null),
     };
+    // บ้านไม่ผูกหมู่บ้าน = resolveDueDate ถอยไปใช้รอบชำระค่ากลาง 15 วัน
+    memberRepository = {
+      find: jest.fn().mockResolvedValue([]),
+      findOne: jest.fn().mockResolvedValue({ id: 1, villages_id: null }),
+    };
+    villageRepository = { findOne: jest.fn().mockResolvedValue(null) };
     photoService = {
       remove: jest.fn().mockResolvedValue(undefined),
       save: jest.fn(),
@@ -92,6 +102,8 @@ describe('BillsService — ด่านตรวจก่อนออกบิ�
       billRepository as unknown as Repository<BillEntity>,
       waterRateRepository as unknown as Repository<WaterRateEntity>,
       meterReadingRepository as unknown as Repository<MeterReadingEntity>,
+      memberRepository as unknown as Repository<MemberEntity>,
+      villageRepository as unknown as Repository<VillageEntity>,
       photoService as unknown as MeterPhotoService,
     );
   });
@@ -448,6 +460,196 @@ describe('BillsService — ด่านตรวจก่อนออกบิ�
           dto({ latitude: 14.9799, longitude: 102.097771 }),
         ),
       ).resolves.toBeDefined();
+    });
+  });
+
+  /**
+   * ด่านนี้จับเคสที่ทั้งด่านจำนวนหลักและด่านหน่วยพุ่งจับไม่ได้:
+   * OCR อ่านผิดค่าโดยจำนวนหลักไม่เปลี่ยน (1250 → 1258)
+   */
+  describe('ความมั่นใจของ OCR', () => {
+    it('อ่านไม่ชัด (ต่ำกว่า 0.85) → บล็อกและบอกเป็นเปอร์เซ็นต์ให้คนอ่านเข้าใจ', async () => {
+      givenBaseline(1250);
+
+      await expect(
+        service.createFromScan(
+          dto({ current_unit: 1258, read_confidence: 0.62 }),
+        ),
+      ).rejects.toThrow(/อ่านเลขมิเตอร์ได้ไม่ชัดเจน.*62%/s);
+    });
+
+    it('ยืนยันแล้วผ่าน (คนตรวจเทียบกับรูปทีละหลักแล้ว)', async () => {
+      givenBaseline(1250);
+
+      await expect(
+        service.createFromScan(
+          dto({
+            current_unit: 1258,
+            read_confidence: 0.62,
+            confirm_low_confidence: true,
+          }),
+        ),
+      ).resolves.toBeDefined();
+    });
+
+    it('ชัดพอ → ผ่านโดยไม่ต้องยืนยัน', async () => {
+      givenBaseline(1250);
+
+      await expect(
+        service.createFromScan(
+          dto({ current_unit: 1258, read_confidence: 0.93 }),
+        ),
+      ).resolves.toBeDefined();
+    });
+
+    it('ไม่ส่งมา (กรอกเลขเอง) → ข้ามด่านนี้ ไม่บล็อกการทำงานปกติ', async () => {
+      givenBaseline(1250);
+
+      await expect(
+        service.createFromScan(dto({ current_unit: 1258 })),
+      ).resolves.toBeDefined();
+    });
+  });
+
+  /**
+   * GPS จริงไม่เคยให้ค่าเดิมเป๊ะทุกทศนิยมสองครั้ง และ EXIF บันทึกเวลาถึงวินาที
+   * ค่าที่ซ้ำจึงเป็นสัญญาณว่ารูปถูกใช้ซ้ำ ไม่ใช่ความบังเอิญ
+   */
+  describe('รูปเก่า / รูปใช้ซ้ำ', () => {
+    it('captured_at ซ้ำกับการจดที่มีอยู่แล้ว → บล็อกตาย ไม่มีปุ่มยืนยัน', async () => {
+      givenBaseline(1250);
+      // ไฟล์เดิมถูกอัปซ้ำ — ไม่มีสถานการณ์ที่ถูกต้องเลยที่จะเกิดเหตุการณ์นี้
+      meterReadingRepository.findOne.mockResolvedValue({
+        id: 77,
+        members_id: 1,
+      });
+
+      const captured = new Date();
+      await expect(
+        service.createFromScan(dto({ captured_at: captured.toISOString() })),
+      ).rejects.toThrow(/เป็นไฟล์รูปเดิมที่เคยใช้ไปแล้ว/);
+    });
+
+    it('พิกัดซ้ำเป๊ะทุกทศนิยม → ขอให้ยืนยัน (อาจเป็นหน้าเว็บ cache ค่าไว้)', async () => {
+      givenBaseline(1250);
+      meterReadingRepository.findOne.mockResolvedValue({
+        id: 88,
+        members_id: 1,
+      });
+
+      await expect(
+        service.createFromScan(
+          dto({ latitude: 14.9799, longitude: 102.097771 }),
+        ),
+      ).rejects.toThrow(/เป๊ะทุกทศนิยม/);
+    });
+
+    it('พิกัดซ้ำ + กดยืนยัน → ผ่าน', async () => {
+      givenBaseline(1250);
+      meterReadingRepository.findOne.mockResolvedValue({
+        id: 88,
+        members_id: 1,
+      });
+
+      await expect(
+        service.createFromScan(
+          dto({
+            latitude: 14.9799,
+            longitude: 102.097771,
+            confirm_duplicate_location: true,
+          }),
+        ),
+      ).resolves.toBeDefined();
+    });
+
+    it('รูปที่ถ่ายไว้เกิน 30 วันก่อนวันจด → ขอให้ยืนยัน', async () => {
+      givenBaseline(1250);
+
+      // ย้อนไป 60 วัน แต่ยังอยู่ในเดือนบิลเดียวกันไม่ได้ จึงส่ง reading_date คู่มาด้วย
+      const stale = new Date();
+      stale.setDate(stale.getDate() - 60);
+
+      await expect(
+        service.createFromScan(
+          dto({
+            captured_at: stale.toISOString(),
+            reading_date: toIso(TODAY),
+          }),
+        ),
+      ).rejects.toThrow(/เลขบนหน้าปัดในรูปอาจไม่ใช่เลขของรอบนี้/);
+    });
+
+    it('รูปที่ถ่ายวันเดียวกับที่จด → ผ่านตามปกติ', async () => {
+      givenBaseline(1250);
+
+      await expect(
+        service.createFromScan(dto({ captured_at: new Date().toISOString() })),
+      ).resolves.toBeDefined();
+    });
+  });
+
+  /**
+   * ของเดิมใช้ค่าเฉลี่ยของบิลทุกใบตลอดกาล ซึ่งถูกค่าโดดลากขึ้นถาวร
+   * และไม่รู้จักคาบบิลที่ยาวกว่าหนึ่งเดือน
+   */
+  describe('เกณฑ์ "หน่วยที่ใช้ตามปกติ"', () => {
+    it('median ทนค่าโดด — ท่อแตกครั้งเดียวไม่ดันเกณฑ์ขึ้นถาวร', () => {
+      // ค่าเฉลี่ยของชุดนี้คือ 75 (โดนลากด้วย 400) แต่ median คือ 10
+      expect(BillsService.usageBaseline([9, 8, 10, 400, 11, 12])).toBe(10.5);
+    });
+
+    it('ดูแค่ 6 เดือนล่าสุด — พฤติกรรมเก่าไม่ถ่วงเกณฑ์ของวันนี้', () => {
+      // 12 เดือนแรกใช้เดือนละ 100 แล้วเปลี่ยนมาใช้ 10 — เกณฑ์ต้องตามของใหม่
+      const history = [
+        ...Array<number>(12).fill(100),
+        ...Array<number>(6).fill(10),
+      ];
+      expect(BillsService.usageBaseline(history)).toBe(10);
+    });
+
+    it('ยังไม่มีประวัติ → null (ผู้เรียกต้องถอยไปใช้เพดานตายตัว)', () => {
+      expect(BillsService.usageBaseline([])).toBeNull();
+      // 0 หน่วยไม่ใช่ประวัติที่ใช้เทียบได้ (เดือนที่ปิดบ้านไป)
+      expect(BillsService.usageBaseline([0, 0])).toBeNull();
+    });
+  });
+
+  describe('กำหนดชำระและคาบบิล', () => {
+    it('ใส่ due_date ให้ทุกใบ = วันจด + รอบชำระของหมู่บ้าน (ค่ากลาง 15 วัน)', async () => {
+      givenBaseline(1250);
+
+      const bill = await service.createFromScan(
+        dto({ current_unit: 1300, reading_date: toIso(TODAY) }),
+      );
+
+      const expected = new Date(TODAY);
+      expected.setDate(expected.getDate() + 15);
+      expect(toIso(bill.due_date as Date)).toBe(toIso(expected));
+    });
+
+    it('หมู่บ้านที่ตั้งรอบชำระเองไว้ ใช้ค่าของหมู่บ้านนั้น', async () => {
+      givenBaseline(1250);
+      memberRepository.findOne.mockResolvedValue({ id: 1, villages_id: 7 });
+      villageRepository.findOne.mockResolvedValue({
+        id: 7,
+        payment_due_days: 30,
+      });
+
+      const bill = await service.createFromScan(
+        dto({ current_unit: 1300, reading_date: toIso(TODAY) }),
+      );
+
+      const expected = new Date(TODAY);
+      expected.setDate(expected.getDate() + 30);
+      expect(toIso(bill.due_date as Date)).toBe(toIso(expected));
+    });
+
+    it('บิลใบแรกของบ้าน (ยังไม่มีบิลเก่า) นับเป็นคาบเดือนเดียว', async () => {
+      givenBaseline(1250);
+
+      const bill = await service.createFromScan(dto({ current_unit: 1300 }));
+
+      expect(bill.period_months).toBe(1);
     });
   });
 });

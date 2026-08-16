@@ -26,11 +26,15 @@
 | `db/migrate-village-zipcode.sql`     | เพิ่ม `zip_code` ให้ `villages` แล้วเติมค่าเริ่มต้นจากตำบลที่เลือกไว้                  | ทุกฐานข้อมูล (ยังไม่อยู่ใน dump)      |
 | `db/migrate-member-accounts.sql`     | บัญชีลูกบ้าน — เพิ่ม `role` ให้ตาราง `admin` + สร้าง `account_members` (1 เบอร์ผูกได้หลายบ้าน) | ฐานข้อมูลที่ยังไม่มี `account_members` |
 | `db/migrate-reports.sql`             | ตาราง `reports` สำหรับเรื่องที่ลูกบ้านแจ้ง — **ต้องรันหลัง `migrate-member-accounts.sql`** | ฐานข้อมูลที่ยังไม่มีตารางนี้          |
+| `db/migrate-village-meter-pitch.sql` | เพิ่ม `meter_pitch_m` ให้ `villages` (ระยะเดินเฉลี่ยต่อมิเตอร์ ใช้คิดรัศมีเตือนตอนสแกน)   | ทุกฐานข้อมูล (ยังไม่อยู่ใน dump)      |
+| `db/migrate-bill-audit.sql`          | `bills.due_date` + `bills.period_months` + `meter_readings.read_confidence` + `villages.payment_due_days` | ทุกฐานข้อมูล (ยังไม่อยู่ใน dump)      |
 
 ```powershell
 & "C:\xampp\mysql\bin\mysql.exe" -u root water-bill-db < db\migrate-reading-location.sql
 & "C:\xampp\mysql\bin\mysql.exe" -u root water-bill-db < db\migrate-meter-digits.sql
 & "C:\xampp\mysql\bin\mysql.exe" -u root water-bill-db < db\migrate-village-zipcode.sql
+& "C:\xampp\mysql\bin\mysql.exe" -u root water-bill-db < db\migrate-village-meter-pitch.sql
+& "C:\xampp\mysql\bin\mysql.exe" -u root water-bill-db < db\migrate-bill-audit.sql
 ```
 
 ไฟล์อื่นในโฟลเดอร์ `db/`:

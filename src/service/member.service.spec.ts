@@ -129,11 +129,25 @@ describe('MemberService — ด่านตรวจพิกัด', () => {
       expect(result.initial_reading.gps_accuracy_m).toBe(12);
     });
 
-    it('ปฏิเสธเมื่อสัญญาณ GPS ยังไม่นิ่ง (เกิน 50 เมตร)', async () => {
+    it('ปฏิเสธเมื่อสัญญาณ GPS ยังไม่นิ่ง (เกิน 20 เมตร)', async () => {
       await expect(
         service.registerOnsite(onsite({ gps_accuracy_m: 120 })),
       ).rejects.toThrow(/สัญญาณ GPS ยังไม่นิ่ง/);
       expect(memberRepository.manager.transaction).not.toHaveBeenCalled();
+    });
+
+    // ล็อกเกณฑ์ใหม่ไว้: 35 ม. เคยผ่านสมัยเกณฑ์ 50 แต่รวมกับความคลาดเคลื่อน
+    // ตอนจด (~30 ม.) แล้วเกิน GPS_NEAR_M จนใช้ตัดสินอะไรไม่ได้
+    it('ปฏิเสธ accuracy 35 เมตร ที่เคยผ่านสมัยเกณฑ์ 50', async () => {
+      await expect(
+        service.registerOnsite(onsite({ gps_accuracy_m: 35 })),
+      ).rejects.toThrow(/ต้องไม่เกิน 20 เมตร/);
+    });
+
+    it('ยอมรับ accuracy ที่ขอบเกณฑ์พอดี (20 เมตร)', async () => {
+      await expect(
+        service.registerOnsite(onsite({ gps_accuracy_m: 20 })),
+      ).resolves.toBeDefined();
     });
 
     it('ปฏิเสธเลขมิเตอร์ตั้งต้นที่ติดลบ', async () => {

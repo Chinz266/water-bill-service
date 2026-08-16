@@ -43,6 +43,20 @@ export class BillEntity {
   @Column({ length: 10 })
   billing_year!: string; // ประจำปี (เช่น '2026')
 
+  /**
+   * วันครบกำหนดชำระ — `markOverdue()` ใช้ตัวนี้ดีดสถานะเป็น Overdue เอง
+   * NULL = บิลเก่าที่ออกก่อนมีระบบนี้ ตั้งใจไม่เติมย้อนหลัง (ดู db/migrate-bill-audit.sql)
+   */
+  @Column({ type: 'date', nullable: true })
+  due_date!: Date | null;
+
+  /**
+   * บิลใบนี้ครอบคลุมกี่เดือน — >1 แปลว่ามีเดือนที่ไม่ได้จดคั่นอยู่
+   * ด่านหน่วยพุ่งต้องหารด้วยค่านี้ก่อนเทียบเกณฑ์ ไม่งั้นบิล 2 เดือนจะเด้งทั้งที่เลขถูก
+   */
+  @Column({ type: 'tinyint', unsigned: true, default: 1 })
+  period_months!: number;
+
   // สมมติสถานะการจ่ายเงินมี 3 แบบ: รอจ่าย, จ่ายแล้ว, ค้างชำระ
   @Column({
     type: 'enum',
