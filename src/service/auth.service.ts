@@ -54,6 +54,11 @@ export class AuthService {
       sub: admin.id,
       email: admin.email,
       role: (admin.role as UserRole) ?? 'admin',
+      // 🌟 ฝัง admin_role ลง token ด้วย เพื่อให้ด่านแก้บิล (PATCH /bills/:id/reading)
+      //    ตัดสินสิทธิ์จากสิ่งที่เซิร์ฟเวอร์เซ็นเอง ไม่ใช่ค่าที่หน้าเว็บส่งมาใน body
+      //    บัญชีลูกบ้านไม่มีค่านี้ (เป็น staff ตาม default ของคอลัมน์) ซึ่งไม่มีผล
+      //    เพราะ route ฝั่งผู้ดูแลกัน role='member' ไว้อีกชั้นอยู่แล้ว
+      admin_role: admin.admin_role ?? 'staff',
     };
     return {
       access_token: await this.jwtService.signAsync(payload),

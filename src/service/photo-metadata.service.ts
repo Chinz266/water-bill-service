@@ -119,26 +119,27 @@ export class PhotoMetadataService {
   }
 
   /**
-   * ระยะทางระหว่างสองพิกัดเป็นเมตร (Haversine)
+   * ระยะทางระหว่างสองพิกัดเป็นเมตร (Equirectangular approximation)
    *
-   * ที่ละติจูดไทย 0.00001° ≈ 1.1 เมตรทั้งสองแกน ระยะระดับร้อยเมตรจึงคลาดเคลื่อนไม่ถึงเซนติเมตร
+   * แปลงองศาเป็นเมตรก่อนแล้วค่อยเข้าสูตรพีทาโกรัส แกน Y คงที่ 111,320 ม./องศา
+   * ส่วนแกน X ต้องหดตาม cos(ละติจูด) เพราะเส้นเมริเดียนลู่เข้าหากันเมื่อขึ้นไปทางขั้วโลก
+   *
+   * ระยะที่ระบบนี้ใช้จริงคือระดับสิบถึงร้อยเมตรในหมู่บ้านเดียวกัน ช่วงนั้นผิวโลกแบนพอ
+   * ที่จะให้ผลเท่า Haversine ในทางปฏิบัติ แต่คำนวณเร็วกว่าเพราะไม่มี asin/sqrt ซ้อน
    */
   static distanceMeters(
     a: { latitude: number; longitude: number },
     b: { latitude: number; longitude: number },
   ): number {
-    const EARTH_RADIUS_M = 6_371_000;
+    const METERS_PER_DEGREE = 111_320;
     const toRad = (deg: number) => (deg * Math.PI) / 180;
 
-    const dLat = toRad(b.latitude - a.latitude);
-    const dLon = toRad(b.longitude - a.longitude);
-    const lat1 = toRad(a.latitude);
-    const lat2 = toRad(b.latitude);
+    const latAvgRad = toRad((a.latitude + b.latitude) / 2);
 
-    const h =
-      Math.sin(dLat / 2) ** 2 +
-      Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+    const x =
+      (b.longitude - a.longitude) * Math.cos(latAvgRad) * METERS_PER_DEGREE;
+    const y = (b.latitude - a.latitude) * METERS_PER_DEGREE;
 
-    return 2 * EARTH_RADIUS_M * Math.asin(Math.sqrt(h));
+    return Math.sqrt(x ** 2 + y ** 2);
   }
 }

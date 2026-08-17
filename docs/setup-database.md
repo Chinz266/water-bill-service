@@ -28,6 +28,14 @@
 | `db/migrate-reports.sql`             | ตาราง `reports` สำหรับเรื่องที่ลูกบ้านแจ้ง — **ต้องรันหลัง `migrate-member-accounts.sql`** | ฐานข้อมูลที่ยังไม่มีตารางนี้          |
 | `db/migrate-village-meter-pitch.sql` | เพิ่ม `meter_pitch_m` ให้ `villages` (ระยะเดินเฉลี่ยต่อมิเตอร์ ใช้คิดรัศมีเตือนตอนสแกน)   | ทุกฐานข้อมูล (ยังไม่อยู่ใน dump)      |
 | `db/migrate-bill-audit.sql`          | `bills.due_date` + `bills.period_months` + `meter_readings.read_confidence` + `villages.payment_due_days` | ทุกฐานข้อมูล (ยังไม่อยู่ใน dump)      |
+| `db/migrate-reading-audit.sql`       | ตาราง `reading_flags` (ร่องรอยการกดข้ามด่าน) + `meter_readings.entry_method` / `client_uuid` / `photo_purged_at` | ทุกฐานข้อมูล (ยังไม่อยู่ใน dump)      |
+| `db/migrate-bill-arrears.sql`        | ทบยอดค้าง — `bills.arrears_amount` / `grand_total` + ตาราง `bill_arrears`                | ทุกฐานข้อมูล (ยังไม่อยู่ใน dump)      |
+| `db/migrate-meters.sql`              | ทะเบียนมิเตอร์ (ตาราง `meters` + `meter_readings.meters_id`)                            | ทุกฐานข้อมูล (ยังไม่อยู่ใน dump)      |
+| `db/migrate-tenancies.sql`           | ผู้อยู่อาศัยแต่ละช่วง + บิลปิดยอดตอนย้ายออก (`bills.tenancy_id` / `is_final`)           | **ต้องรันหลัง `migrate-bill-arrears.sql`** |
+| `db/migrate-unassigned-readings.sql` | ตาราง `unassigned_readings` — รูปที่ยังไม่รู้ว่าของบ้านไหน รอ Admin จับคู่               | ทุกฐานข้อมูล (ยังไม่อยู่ใน dump)      |
+| `db/migrate-village-usage-thresholds.sql` | เกณฑ์หน่วยน้ำผิดปกติรายหมู่บ้าน + `villages.gps_near_m`                            | ทุกฐานข้อมูล (ยังไม่อยู่ใน dump)      |
+| `db/migrate-admin-role.sql`          | `admin.admin_role` (`owner` / `staff`) — คุมว่าใครแก้บิลย้อนหลังได้                     | ทุกฐานข้อมูล (ยังไม่อยู่ใน dump)      |
+| `db/migrate-reading-edit-log.sql`    | ตาราง `meter_reading_logs` — ร่องรอยการแก้เลขมิเตอร์หลังออกบิล                          | ทุกฐานข้อมูล (ยังไม่อยู่ใน dump)      |
 
 ```powershell
 & "C:\xampp\mysql\bin\mysql.exe" -u root water-bill-db < db\migrate-reading-location.sql
@@ -35,7 +43,22 @@
 & "C:\xampp\mysql\bin\mysql.exe" -u root water-bill-db < db\migrate-village-zipcode.sql
 & "C:\xampp\mysql\bin\mysql.exe" -u root water-bill-db < db\migrate-village-meter-pitch.sql
 & "C:\xampp\mysql\bin\mysql.exe" -u root water-bill-db < db\migrate-bill-audit.sql
+& "C:\xampp\mysql\bin\mysql.exe" -u root water-bill-db < db\migrate-reading-audit.sql
+& "C:\xampp\mysql\bin\mysql.exe" -u root water-bill-db < db\migrate-bill-arrears.sql
+& "C:\xampp\mysql\bin\mysql.exe" -u root water-bill-db < db\migrate-meters.sql
+& "C:\xampp\mysql\bin\mysql.exe" -u root water-bill-db < db\migrate-tenancies.sql
+& "C:\xampp\mysql\bin\mysql.exe" -u root water-bill-db < db\migrate-unassigned-readings.sql
+& "C:\xampp\mysql\bin\mysql.exe" -u root water-bill-db < db\migrate-village-usage-thresholds.sql
+& "C:\xampp\mysql\bin\mysql.exe" -u root water-bill-db < db\migrate-admin-role.sql
+& "C:\xampp\mysql\bin\mysql.exe" -u root water-bill-db < db\migrate-reading-edit-log.sql
 ```
+
+⚠️ `migrate-admin-role.sql` ตั้งผู้ดูแลที่มีอยู่แล้วทุกคนเป็น `owner` เพื่อไม่ให้ใครถูกตัดสิทธิ์
+กลางคัน — **ต้องไล่ลดคนที่ควรเป็น `staff` ด้วยมือหลังรัน** ไม่งั้นด่าน "ใครแก้บิลย้อนหลังได้"
+จะไม่ได้กันอะไรเลย (คำสั่งตัวอย่างอยู่ในคอมเมนต์ท้ายไฟล์)
+
+⚠️ **ลำดับสำคัญสองจุด** — `migrate-tenancies.sql` สร้าง FK ไปที่ `bills` จึงต้องรันหลังคอลัมน์
+ของ `migrate-bill-arrears.sql` ถูกเพิ่มแล้ว และ `migrate-meters.sql` ต้องมาก่อนไฟล์ที่อ้าง `meters`
 
 ไฟล์อื่นในโฟลเดอร์ `db/`:
 

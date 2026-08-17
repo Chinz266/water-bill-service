@@ -27,6 +27,14 @@ export class AdminEntity {
   @Column({ type: 'varchar', length: 45, nullable: true })
   role!: string;
 
+  // 🌟 สิทธิ์ของผู้ดูแล — คนละเรื่องกับ role ข้างบน
+  //    role      ตอบว่า "เข้าหน้าไหนได้" (admin = หลังบ้าน / member = ดูบิลบ้านตัวเอง)
+  //    admin_role ตอบว่า "แก้ของเก่าได้แค่ไหน" (owner แก้บิลย้อนหลังได้ / staff แก้ได้จำกัด)
+  //    ค่าเริ่มต้นเป็น staff เสมอ เพราะ POST /auth/register เป็น endpoint สาธารณะ —
+  //    บัญชีที่เปิดเองต้องไม่ได้สิทธิ์แก้ยอดเงินย้อนหลังติดมาด้วย
+  @Column({ type: 'enum', enum: ['owner', 'staff'], default: 'staff' })
+  admin_role!: 'owner' | 'staff';
+
   // 🌟 รูปโปรไฟล์ผู้ดูแล เก็บเป็น base64 data URL (ย่อขนาดจากฝั่งเว็บก่อนแล้ว)
   //    MEDIUMTEXT เพราะ varchar สั้นเกินเก็บ base64 ไม่พอ
   @Column({ type: 'mediumtext', nullable: true })

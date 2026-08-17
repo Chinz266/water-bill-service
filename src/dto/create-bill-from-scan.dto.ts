@@ -145,4 +145,25 @@ export class CreateBillFromScanDto {
     example: 'data:image/jpeg;base64,/9j/4AAQSkZJRg...',
   })
   meter_photo?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'เลขมิเตอร์นี้มาจากไหน — ocr / manual / manual_after_ocr_fail\n\n' +
+      '⚠️ ค่าที่ขึ้นต้นด้วย manual **บังคับให้แนบ meter_photo มาด้วยเสมอ** ไม่มีปุ่มยืนยันให้ข้าม ' +
+      'เพราะเลขที่กรอกเองแล้วไม่มีรูปคือข้อมูลที่ไม่เหลืออะไรให้ตรวจสอบย้อนหลังได้เลย\n\n' +
+      'ไม่ส่งมา = ระบบเดาจากว่ามีค่า read_confidence ติดมาไหม (หน้าเว็บรุ่นเก่าจึงยังทำงานได้)',
+    enum: ['ocr', 'manual', 'manual_after_ocr_fail'],
+    example: 'manual_after_ocr_fail',
+  })
+  entry_method?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'รหัสที่แอปสร้างตอน "กดบันทึก" ตอนอยู่หน้างาน (crypto.randomUUID) — ' +
+      'ใช้กันบิลซ้ำเวลา auto-sync ยิงซ้ำเพราะเน็ตหลุดก่อนได้รับคำตอบ\n\n' +
+      'ยิงซ้ำด้วย uuid เดิมจะได้บิลใบเดิมกลับไป (200) ไม่ใช่ error — ' +
+      '⚠️ ต้องสร้างตอนกดบันทึกครั้งแรกเท่านั้น ถ้าสร้างใหม่ตอนจะยิงจะกันอะไรไม่ได้เลย',
+    example: '3f2504e0-4f89-11d3-9a0c-0305e82c3301',
+  })
+  client_uuid?: string;
 }

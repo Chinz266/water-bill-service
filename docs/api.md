@@ -21,12 +21,40 @@ Swagger อยู่ที่ `http://localhost:3000/api` — ตารางน
 | GET              | `/bills`, `/bills/:id`                                                        |                                              |
 | GET              | `/bills/member/:membersId/month?month=&year=`                                 | บ้านนี้มีบิลเดือนนี้แล้วหรือยัง (null = ยัง) |
 | GET              | `/bills/member/:membersId/previous?month=&year=`                              | เลขตั้งต้นที่จะใช้คิดหน่วยน้ำ                |
-| PATCH            | `/bills/:id/status`                                                           | `Pending` / `Paid` / `Overdue`               |
+| POST             | `/bills/:id/pay`                                                              | **รับชำระเงิน — ปิดใบเก่าที่ถูกทบยอดพร้อมกัน** |
+| PATCH            | `/bills/:id/reading`                                                          | **แก้เลขมิเตอร์ของบิลที่ออกแล้ว** (multipart) |
+| PATCH            | `/bills/:id/status`                                                           | `Pending` / `Paid` / `Overdue` — ⚠️ อย่าใช้รับเงิน |
 | DELETE           | `/bills/:id`                                                                  | บิลที่ `Paid` แล้วลบไม่ได้                   |
+| GET/POST         | `/meters/member/:membersId`, `/meters/register`                               | ทะเบียนมิเตอร์ของบ้าน                        |
+| POST             | `/meters/replace`                                                             | **เปลี่ยนมิเตอร์ — หน่วยค้างเข้าบิลถัดไปเอง** |
+| GET/POST         | `/tenancies/member/:membersId`, `/tenancies/start`                            | ผู้อยู่อาศัยแต่ละช่วง                        |
+| POST             | `/tenancies/move-out`                                                         | **ย้ายออก — จดครั้งสุดท้าย + ออกบิลปิดยอด**   |
+| GET/POST         | `/readings/unassigned`                                                        | คิวรูปที่ยังไม่รู้ว่าของบ้านไหน               |
+| GET              | `/readings/unassigned/:id?month=&year=`                                       | รูปหนึ่งใบ + บ้านที่เป็นไปได้ 5 อันดับ        |
+| POST             | `/readings/unassigned/:id/assign`, `/discard`                                 | จับคู่แล้วออกบิล / ตีทิ้ง                     |
+| GET              | `/audit/flags`, `/audit/flags/summary?days=`                                  | ธงที่ระบบติดไว้ตอนกดข้ามด่าน                  |
+| GET              | `/audit/reading-logs?bills_id=&limit=`                                        | ประวัติการแก้เลขมิเตอร์หลังออกบิล             |
+| GET/POST         | `/audit/housekeeping`, `/audit/housekeeping/run`                              | งานเก็บกวาด (ดูก่อน แล้วค่อยสั่งรัน)          |
 | GET/PATCH/DELETE | `/reports`, `/reports/:id`                                                    | เรื่องที่ลูกบ้านแจ้งเข้ามา                   |
 | POST/GET         | `/villages`, `/villages/:id`                                                  |                                              |
 | POST/GET         | `/water-rates`, `/water-rates/active`                                         |                                              |
 | GET              | `/locations/provinces`, `/districts/:provinceId`, `/subdistricts/:districtId` |                                              |
+
+### แก้เลขมิเตอร์ของบิลที่ออกไปแล้ว — `PATCH /bills/:id/reading`
+
+`multipart/form-data`: `current_unit`, `reason` (บังคับ), `photo` (ไฟล์, ไม่บังคับ), `confirm_high_usage`, `confirm_meter_reset`
+คืน `{ usage_unit, total_amount, grand_total }`
+
+| สิทธิ์ (`admin_role` ใน token) | แก้ได้เมื่อ                                       |
+| ------------------------------ | ------------------------------------------------- |
+| `owner`                        | ตลอด ยกเว้นบิลที่ `Paid`                          |
+| `staff`                        | บิลที่ **จดวันนี้** หรือบิลที่ยังเป็น `Pending`    |
+
+- บิลที่ `Paid` แก้ไม่ได้แม้เป็น `owner` → ต้อง `PATCH /bills/:id/status` กลับเป็น `Pending` ก่อน (ตอบ 409 `code: BILL_PAID`)
+- ติดด่านตอบ **400** พร้อม `{ message, code: 'high_usage' | 'meter_reset' }` — หน้าเว็บอ่าน `code` เพื่อเปิดปุ่มยืนยัน แล้วยิงซ้ำพร้อม `confirm_*` **เฉพาะรอบนั้น** (ห้ามติ๊กล่วงหน้า) error ที่ไม่มี `code` = error ธรรมดา ห้ามขึ้นปุ่มให้กดข้าม
+- รูปที่แนบมาถูกครอปจากหน้าเว็บแล้วจึงไม่มี EXIF — ระบบ **ไม่เอาไปอัปเดตพิกัด/เวลาถ่าย** ของการจดครั้งนั้น
+- แก้สำเร็จให้โหลดประวัติบิลใหม่ทั้งชุด: ยอดค้างที่ใบอื่นทบใบนี้ไว้ (`arrears_amount` / `grand_total`) ถูกคิดใหม่ตามไปด้วย
+- ทุกครั้งที่แก้จะมีแถวลง `meter_reading_logs` (เลขเดิม/ใหม่ ยอดเดิม/ใหม่ เหตุผล ใครแก้) ดูผ่าน `GET /audit/reading-logs?bills_id=`
 
 ## พอร์ทัลลูกบ้าน — `/me/*`
 

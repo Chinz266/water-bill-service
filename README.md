@@ -156,6 +156,7 @@ API ป้องกันด้วย `JwtAuthGuard` + `RolesGuard` ที่ล
 | [docs/api.md](docs/api.md)                           | ตาราง endpoint ทั้งหมด, พอร์ทัลลูกบ้าน, สัญญาของ vision service             |
 | [docs/billing-rules.md](docs/billing-rules.md)       | เลขตั้งต้นที่ใช้คิดหน่วย, ด่านกันข้อมูลผิดตอนออกบิล, ลงทะเบียนแบบยืนที่มิเตอร์ |
 | [docs/scan-batch.md](docs/scan-batch.md)             | จับคู่รูปกับบ้าน, บทบาทของ GPS, EXIF หายง่ายแค่ไหน                          |
+| [docs/offline-mode.md](docs/offline-mode.md)         | หน้างานไม่มีสัญญาณ — คิวใน IndexedDB, `client_uuid` กันบิลซ้ำ, สิ่งที่ UI ต้องมี |
 | [docs/known-issues.md](docs/known-issues.md)         | ปัญหาที่ยังค้าง, ช่องที่ยังหลุด, จุดที่มักสะดุด                              |
 | [meter-vision-service/README.md](meter-vision-service/README.md) | รายละเอียดฝั่งโมเดล YOLO                                       |
 

@@ -43,11 +43,32 @@ import {
   DistrictEntity,
   SubdistrictEntity,
 } from './entity/location.entity';
+import { ScheduleModule } from '@nestjs/schedule';
+import { BillArrearsEntity } from './entity/bill-arrears.entity';
+import { MeterEntity } from './entity/meter.entity';
+import { TenancyEntity } from './entity/tenancy.entity';
+import { ReadingFlagEntity } from './entity/reading-flag.entity';
+import { MeterReadingLogEntity } from './entity/meter-reading-log.entity';
+import { UnassignedReadingEntity } from './entity/unassigned-reading.entity';
+import { MetersController } from './controller/meters.controller';
+import { MetersService } from './service/meters.service';
+import { TenanciesController } from './controller/tenancies.controller';
+import { TenancyService } from './service/tenancy.service';
+import { UnassignedReadingsController } from './controller/unassigned-readings.controller';
+import { UnassignedReadingsService } from './service/unassigned-readings.service';
+import { AuditController } from './controller/audit.controller';
+import { ReadingFlagsService } from './service/reading-flags.service';
+import { ReadingLogsService } from './service/reading-logs.service';
+import { HousekeepingService } from './service/housekeeping.service';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     HttpModule,
+    // ⏰ งานที่ต้องเกิดขึ้นเองแม้ไม่มีใครเข้าเว็บทั้งเดือน (ดู HousekeepingService)
+    //    พื้นที่ดิสก์ต่างจากสถานะบิลตรงที่ไม่มีใคร "เปิดดู" มันหมดเงียบ ๆ
+    //    แล้วระบบล้มตอนที่ยังต้องใช้งานอยู่
+    ScheduleModule.forRoot(),
     TypeOrmModule.forRoot({
       type: 'mysql',
       host: 'localhost',
@@ -93,6 +114,12 @@ import {
       ProvinceEntity,
       DistrictEntity,
       SubdistrictEntity,
+      BillArrearsEntity,
+      MeterEntity,
+      TenancyEntity,
+      ReadingFlagEntity,
+      MeterReadingLogEntity,
+      UnassignedReadingEntity,
     ]),
   ],
   controllers: [
@@ -107,6 +134,10 @@ import {
     MemberPortalController,
     LocationsController,
     ReportsController,
+    MetersController,
+    TenanciesController,
+    UnassignedReadingsController,
+    AuditController,
   ],
   providers: [
     AppService,
@@ -122,6 +153,12 @@ import {
     AuthService,
     MemberPortalService,
     ReportsService,
+    MetersService,
+    TenancyService,
+    UnassignedReadingsService,
+    ReadingFlagsService,
+    ReadingLogsService,
+    HousekeepingService,
     // 🔐 ตั้ง guard เป็น global = ทุก endpoint ปิดไว้ก่อนเป็นค่าเริ่มต้น
     //    route ไหนที่ตั้งใจเปิดสาธารณะต้องแปะ @Public() เอง
     //    ปลอดภัยกว่าไล่แปะ guard ทีละ route เพราะ "ลืมแปะ = ปิด" ไม่ใช่ "ลืมแปะ = เปิดทิ้ง"

@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Controller,
   Get,
   Post,
@@ -8,9 +9,10 @@ import {
   Delete,
   Query,
   UseInterceptors,
+  UploadedFile,
   UploadedFiles,
 } from '@nestjs/common';
-import { FilesInterceptor } from '@nestjs/platform-express';
+import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import {
   ApiTags,
   ApiOperation,
@@ -24,7 +26,11 @@ import { ScanBatchService } from 'src/service/scan-batch.service';
 import { CreateBillDto } from 'src/dto/create-bill.dto';
 import { CreateBillFromScanDto } from 'src/dto/create-bill-from-scan.dto';
 import { ScanBatchDto } from 'src/dto/scan-batch.dto';
+import { UpdateReadingDto } from 'src/dto/update-reading.dto';
 import { Roles } from 'src/auth/roles.decorator';
+import { CurrentUser } from 'src/auth/current-user.decorator';
+// ต้องเป็น `import type` เพราะ tsconfig เปิด isolatedModules + emitDecoratorMetadata ไว้
+import type { JwtPayload } from 'src/auth/auth.constants';
 
 @ApiTags('Bills (บิลเรียกเก็บค่าน้ำ)')
 // 🔐 ทั้ง controller นี้เป็นงานฝั่งผู้ดูแลหมู่บ้าน — ต้องล็อกอินเป็น admin เท่านั้น
@@ -174,6 +180,73 @@ export class BillsController {
   async findOne(@Param('id') id: string) {
     return await this.billsService.findOne(+id);
   }
+  @Post(':id/pay')
+  @ApiOperation({
+    summary: 'รับชำระเงิน — ปิดใบเก่าที่ถูกทบยอดเข้ามาให้ด้วยทั้งชุด',
+    description:
+      'ลูกบ้านจ่ายตามยอด grand_total ซึ่งรวมยอดค้างของใบเก่าไปแล้ว\n\n' +
+      '⚠️ อย่าใช้ PATCH /:id/status เพื่อรับเงินอีกต่อไป — ตัวนั้นปิดแค่ใบเดียว ' +
+      'ใบเก่าที่ถูกทบจะยังค้างอยู่ แล้วบิลเดือนถัดไปจะทบยอดเดิมเข้าไปอีกรอบ ' +
+      '(ลูกบ้านโดนเก็บซ้ำจากก้อนที่จ่ายไปแล้ว)\n\n' +
+      'ตอบกลับมี settled_bill_ids บอกว่าปิดใบไหนไปพร้อมกันบ้าง',
+  })
+  async pay(@Param('id') id: string, @Body('paid_by') paidBy?: number) {
+    return await this.billsService.payBill(+id, paidBy);
+  }
+
+  @Patch(':id/reading')
+  @ApiOperation({
+    summary: 'แก้เลขมิเตอร์ของบิลที่ออกไปแล้ว (คิดยอดใหม่ให้ทั้งสาย)',
+    description:
+      'ใช้ตอน OCR อ่านผิดแล้วบิลออกไปแล้ว — แก้เฉพาะตัวเลข โดยคงหลักฐานการเดินไปจด ' +
+      '(พิกัด/เวลาถ่าย) ของครั้งนั้นไว้ทั้งหมด ต่างจากการ "จดทับ" ที่ลบใบเดิมทิ้งแล้วสร้างใหม่\n\n' +
+      '**สิทธิ์:** owner แก้ได้ตลอด / staff แก้ได้เฉพาะใบที่จดวันนี้ หรือใบที่ยังเป็น "รอชำระเงิน"\n\n' +
+      '⚠️ บิลที่ชำระเงินแล้วแก้ไม่ได้แม้จะเป็น owner — ต้องกดปรับสถานะกลับเป็นรอชำระก่อน\n\n' +
+      '⚠️ `reason` บังคับกรอกเสมอ (เก็บลง meter_reading_logs — ดู GET /audit/reading-logs)\n\n' +
+      'ติดด่านจะได้ **400** พร้อม `code: "high_usage" | "meter_reset"` ให้หน้าเว็บเปิดปุ่มยืนยัน ' +
+      'แล้วยิงซ้ำพร้อม `confirm_high_usage` / `confirm_meter_reset` — error ที่ไม่มี `code` ' +
+      'คือ error ธรรมดา ห้ามขึ้นปุ่มยืนยันให้กดข้าม\n\n' +
+      'แก้สำเร็จแล้วให้โหลดประวัติบิลใหม่ทั้งชุด เพราะยอดค้างที่ใบอื่นทบใบนี้ไว้เปลี่ยนตามไปด้วย',
+  })
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(FileInterceptor('photo'))
+  async updateReading(
+    @Param('id') id: string,
+    @Body() dto: UpdateReadingDto,
+    @CurrentUser() user: JwtPayload,
+    @UploadedFile() photo?: Express.Multer.File,
+  ) {
+    return await this.billsService.updateReading(
+      +id,
+      {
+        current_unit: dto.current_unit,
+        reason: dto.reason,
+        // MeterPhotoService รับ data URL เท่านั้น (ผ่าน sharp เองเพื่อกันไฟล์ที่ไม่ใช่รูป
+        // ถูกวางไว้ในโฟลเดอร์ที่เสิร์ฟเป็น static) — แปลงจากไฟล์ที่อัปมาให้ตรงรูปแบบนั้น
+        photo: photo ? BillsController.toDataUrl(photo) : null,
+        confirm_high_usage: dto.confirm_high_usage,
+        confirm_meter_reset: dto.confirm_meter_reset,
+      },
+      {
+        // ⚠️ ต้องมาจาก token ที่เซิร์ฟเวอร์เซ็นเองเท่านั้น ห้ามรับจาก body เด็ดขาด
+        //    ไม่งั้นใครก็ยิง admin_role: 'owner' มาเองได้
+        id: user?.sub ?? null,
+        // token ที่ออกก่อน migrate-admin-role.sql ไม่มีฟิลด์นี้ — ถือเป็น staff เสมอ
+        admin_role: user?.admin_role ?? 'staff',
+      },
+    );
+  }
+
+  /** ไฟล์ที่อัปมา → data URL ที่ MeterPhotoService รับได้ */
+  private static toDataUrl(file: Express.Multer.File): string {
+    if (!file.mimetype?.startsWith('image/')) {
+      throw new BadRequestException(
+        'ไฟล์ที่แนบมาไม่ใช่รูปภาพครับ กรุณาแนบรูปหน้าปัดมิเตอร์',
+      );
+    }
+    return `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+  }
+
   // 🌟 เพิ่มฟังก์ชันนี้สำหรับรับค่าการอัปเดตสถานะ
   @Patch(':id/status')
   async updateStatus(

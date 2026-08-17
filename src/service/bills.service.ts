@@ -3,9 +3,10 @@ import {
   NotFoundException,
   BadRequestException,
   ConflictException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { Between, EntityManager, In, IsNull, Not, Repository } from 'typeorm';
 import { BillEntity, PAYMENT_STATUSES } from 'src/entity/bill.entity';
 import { WaterRateEntity } from '../entity/water-rate.entity'; // ปรับ Path ให้ตรงกับโฟลเดอร์ของคุณ
 import { MeterReadingEntity } from '../entity/meter-reading.entity';
@@ -16,10 +17,15 @@ import {
   DistrictEntity,
   SubdistrictEntity,
 } from '../entity/location.entity';
+import { BillArrearsEntity } from '../entity/bill-arrears.entity';
+import { MeterEntity } from '../entity/meter.entity';
 import { CreateBillDto } from 'src/dto/create-bill.dto';
 import { CreateBillFromScanDto } from 'src/dto/create-bill-from-scan.dto';
 import { MeterPhotoService } from './meter-photo.service';
 import { PhotoMetadataService } from './photo-metadata.service';
+import { PendingFlag, ReadingFlagsService } from './reading-flags.service';
+import { ReadingLogsService } from './reading-logs.service';
+import { AdminRole } from 'src/auth/auth.constants';
 
 /**
  * คอลัมน์ดิบที่ billDetailQuery() ดึงมาจาก join (ชื่อ = alias_ชื่อคอลัมน์)
@@ -43,6 +49,22 @@ interface BillDetailRow {
   subdistrict_name_in_thai?: string | null;
   district_name_in_thai?: string | null;
   province_name_in_thai?: string | null;
+}
+
+/**
+ * เกณฑ์ตัดสิน "หน่วยน้ำผิดปกติ" ของหมู่บ้านหนึ่ง
+ *
+ * แยกเป็น 2 ระดับด้วยเจตนาคนละอย่าง:
+ *   warnRatio  — ติดธงไว้ให้ไล่ดูย้อนหลัง ไม่รบกวนคนหน้างาน
+ *   spikeRatio — บล็อก 409 ต้องกดยืนยัน
+ */
+export interface UsageThresholds {
+  warnRatio: number;
+  spikeRatio: number;
+  /** ต่ำกว่านี้ (หน่วย/เดือน) ไม่ถือว่าผิดปกติแม้เกินอัตราส่วน */
+  floor: number;
+  /** เพดานตายตัวสำหรับบ้านที่ยังไม่มีประวัติให้เทียบ */
+  hardCap: number;
 }
 
 /**
@@ -77,6 +99,12 @@ export const BILL_ERROR_CODES = {
 
   /** ไฟล์รูปเดิมถูกอัปซ้ำ (captured_at ตรงเป๊ะ) — ต้องถ่ายใหม่เท่านั้น */
   PHOTO_REUSED: 'PHOTO_REUSED',
+  /** ถ่ายรัวหลายใบที่จุดเดียวกันในไม่กี่วินาที — ต้องเดินไปถ่ายที่มิเตอร์จริง */
+  BURST_PHOTO: 'BURST_PHOTO',
+  /** เวลาถ่ายเป็นอนาคต — นาฬิกาเครื่องเพี้ยนหรือถูกแก้ ต้องตั้งเวลาให้ตรงก่อน */
+  FUTURE_TIMESTAMP: 'FUTURE_TIMESTAMP',
+  /** กรอกเลขเองแต่ไม่แนบรูปหน้าปัด — ไม่มีอะไรตรวจเลขได้เลย */
+  MANUAL_PHOTO_REQUIRED: 'MANUAL_PHOTO_REQUIRED',
   /** บิลเดือนนี้จ่ายเงินแล้ว — ต้องปรับสถานะกลับเป็นค้างชำระก่อน */
   BILL_PAID: 'BILL_PAID',
   /** มีบิลเดือนที่ใหม่กว่าอยู่ — ต้องลบใบนั้นก่อน */
@@ -85,6 +113,23 @@ export const BILL_ERROR_CODES = {
 
 export type BillErrorCode =
   (typeof BILL_ERROR_CODES)[keyof typeof BILL_ERROR_CODES];
+
+/**
+ * รหัสด่านของ **PATCH /bills/:id/reading** โดยเฉพาะ
+ *
+ * ⚠️ ตัวพิมพ์เล็ก และเป็น 400 ไม่ใช่ 409 — ต่างจาก BILL_ERROR_CODES ข้างบนโดยตั้งใจ
+ *    เพราะเป็นสัญญาที่ตกลงไว้กับหน้าแก้บิลแล้ว (หน้าเว็บอ่าน `code` ตัวนี้เพื่อเปิด
+ *    ปุ่มยืนยัน ถ้าไม่มี code จะขึ้นเป็น error ธรรมดา) ห้ามเปลี่ยนโดยไม่แก้หน้าเว็บด้วย
+ *
+ * มีแค่สองตัวเพราะทางแก้บิลเปิดปุ่มยืนยันแค่สองด่านนี้ — ด่านอื่น (จำนวนหลัก,
+ * ความมั่นใจ OCR) ไม่มีความหมายตรงนี้ เลขที่ส่งมาคือเลขที่คนพิมพ์เองอยู่แล้ว
+ */
+export const READING_EDIT_ERROR_CODES = {
+  /** หน่วยน้ำหลังแก้สูงผิดปกติ → `confirm_high_usage` */
+  HIGH_USAGE: 'high_usage',
+  /** เลขใหม่ต่ำกว่าเลขตั้งต้น → `confirm_meter_reset` */
+  METER_RESET: 'meter_reset',
+} as const;
 
 /**
  * body ของ error ที่มีทั้งข้อความไทยและรหัสให้เครื่องอ่าน
@@ -116,6 +161,21 @@ export class BillsService {
     private readonly villageRepository: Repository<VillageEntity>,
 
     private readonly meterPhotoService: MeterPhotoService,
+
+    // ยอดค้างที่ทบเข้าบิลใบใหม่ — เก็บรายใบเพราะตอนรับเงินต้องปิดใบเก่าทุกใบ
+    // ที่ถูกทบพร้อมกัน ไม่งั้นยอดเดิมจะถูกทบซ้ำในเดือนถัดไป
+    @InjectRepository(BillArrearsEntity)
+    private readonly billArrearsRepository: Repository<BillArrearsEntity>,
+
+    // ทะเบียนมิเตอร์ — ใช้หา "หน่วยค้างของมิเตอร์ตัวเก่าที่ยังไม่ได้คิดเงิน"
+    @InjectRepository(MeterEntity)
+    private readonly meterRepository: Repository<MeterEntity>,
+
+    // ธงที่ติดไว้กับการจด — เขียนในทรานแซกชันเดียวกับบิลเสมอ
+    private readonly readingFlagsService: ReadingFlagsService,
+
+    // ร่องรอยการแก้เลขมิเตอร์หลังออกบิล — เขียนในทรานแซกชันเดียวกับการแก้เสมอ
+    private readonly readingLogsService: ReadingLogsService,
   ) {}
 
   /**
@@ -648,6 +708,29 @@ export class BillsService {
   static readonly USAGE_SPIKE_FLOOR = 50;
 
   /**
+   * กี่เท่าของค่ากลางจึง **ติดธงเตือน** — ไม่บล็อก ไม่ต้องกดยืนยัน
+   *
+   * ═══ ทำไมไม่เอา 2 เท่านี้มาเป็นเกณฑ์บล็อกไปเลย ═══
+   *
+   * เพราะหน่วยน้ำเกินสองเท่าเกิดขึ้นจริงเป็นปกติ — หน้าร้อนรดน้ำต้นไม้, ญาติมาพัก,
+   * ล้างรถ/ล้างบ้านครั้งใหญ่ ถ้าบล็อกที่ระดับนี้เจ้าหน้าที่จะเจอหน้าต่างยืนยัน
+   * แทบทุกใบแล้วกดผ่านเป็นนิสัย — ซึ่งทำให้ด่านที่ 5 เท่าพลอยไร้ความหมายไปด้วย
+   * เพราะมือกดไปก่อนตาอ่านเสมอ
+   *
+   * ชั้นนี้จึงมีไว้ตอบคำถามคนละข้อ: "เดือนนี้บ้านไหนใช้น้ำขยับบ้าง" ซึ่งเอาไป
+   * ไล่ดูย้อนหลัง (เช่นหาท่อรั่ว) ได้โดยไม่ต้องรบกวนคนที่กำลังเดินจดอยู่หน้างาน
+   */
+  static readonly USAGE_WARN_RATIO = 2;
+
+  /** เกณฑ์ค่ากลางของระบบ — ใช้เมื่อหมู่บ้านไม่ได้ตั้งค่าเอง */
+  static readonly DEFAULT_USAGE_THRESHOLDS: UsageThresholds = {
+    warnRatio: BillsService.USAGE_WARN_RATIO,
+    spikeRatio: BillsService.USAGE_SPIKE_RATIO,
+    floor: BillsService.USAGE_SPIKE_FLOOR,
+    hardCap: BillsService.USAGE_HARD_CAP,
+  };
+
+  /**
    * ย้อนดูบิลกี่ใบล่าสุดเพื่อหา "หน่วยที่บ้านหลังนี้ใช้ตามปกติ"
    *
    * 6 เดือนพอเห็นทั้งหน้าร้อนและหน้าฝน แต่ไม่ยาวจนพฤติกรรมเมื่อ 3 ปีก่อน
@@ -705,9 +788,9 @@ export class BillsService {
     previousBills: BillEntity[],
     confirmHighUsage?: boolean,
     period_months = 1,
-  ) {
-    if (confirmHighUsage) return;
-
+    thresholds: UsageThresholds = BillsService.DEFAULT_USAGE_THRESHOLDS,
+    confirmedBy?: number | null,
+  ): PendingFlag[] {
     // เทียบ "หน่วยต่อเดือน" กับเกณฑ์ที่เป็นรายเดือนเหมือนกัน
     const months = Math.max(1, period_months);
     const perMonth = usage_unit / months;
@@ -721,10 +804,13 @@ export class BillsService {
     );
 
     if (typical !== null) {
-      // ต้องเกิน 50 หน่วยด้วย ไม่งั้นบ้านที่ปกติใช้ 2 หน่วย พอใช้ 11 หน่วยก็เด้งแล้ว
+      // ต้องเกิน floor ด้วย ไม่งั้นบ้านที่ปกติใช้ 2 หน่วย พอใช้ 11 หน่วยก็เด้งแล้ว
+      const overFloor = perMonth > thresholds.floor;
+
       if (
-        perMonth > typical * BillsService.USAGE_SPIKE_RATIO &&
-        perMonth > BillsService.USAGE_SPIKE_FLOOR
+        !confirmHighUsage &&
+        overFloor &&
+        perMonth > typical * thresholds.spikeRatio
       ) {
         throw new ConflictException(
           billError(
@@ -734,10 +820,27 @@ export class BillsService {
           ),
         );
       }
-      return;
+
+      const flags: PendingFlag[] = [];
+      if (confirmHighUsage) {
+        flags.push({
+          flag_type: 'high_usage',
+          detail: `${usage_unit} หน่วย / คาบ ${months} เดือน (ปกติเดือนละ ${Math.round(typical)} หน่วย) — กดยืนยันผ่าน`,
+          confirmed_by: confirmedBy ?? null,
+        });
+      } else if (overFloor && perMonth > typical * thresholds.warnRatio) {
+        // ชั้นเตือน: ไม่บล็อก ไม่ต้องกดอะไร แค่ทิ้งร่องรอยไว้ให้ไล่ดูย้อนหลังได้
+        // ตั้งไว้เตี้ยกว่าชั้นบล็อกเพราะจุดประสงค์คนละอย่าง — ชั้นนี้ตอบคำถาม
+        // "บ้านไหนใช้น้ำขยับผิดปกติบ้าง" ซึ่งถ้าเอาไปบล็อกจะเด้งจนคนกดผ่านเป็นนิสัย
+        flags.push({
+          flag_type: 'usage_warning',
+          detail: `${usage_unit} หน่วย / คาบ ${months} เดือน = เดือนละ ${Math.round(perMonth)} หน่วย (ปกติ ${Math.round(typical)} หน่วย)`,
+        });
+      }
+      return flags;
     }
 
-    if (perMonth > BillsService.USAGE_HARD_CAP) {
+    if (!confirmHighUsage && perMonth > thresholds.hardCap) {
       throw new ConflictException(
         billError(
           BILL_ERROR_CODES.HIGH_USAGE,
@@ -746,6 +849,46 @@ export class BillsService {
         ),
       );
     }
+
+    return confirmHighUsage && perMonth > thresholds.hardCap
+      ? [
+          {
+            flag_type: 'high_usage',
+            detail: `${usage_unit} หน่วย (บ้านใหม่ ยังไม่มีประวัติ) — กดยืนยันผ่าน`,
+            confirmed_by: confirmedBy ?? null,
+          },
+        ]
+      : [];
+  }
+
+  /**
+   * เกณฑ์หน่วยน้ำผิดปกติของหมู่บ้านหนึ่ง — ไม่ตั้งค่าไว้ก็ใช้ค่ากลางของระบบ
+   *
+   * ตั้งค่าได้รายหมู่บ้านเพราะพฤติกรรมใช้น้ำต่างกันจริง (หมู่บ้านที่ทำเกษตร
+   * หลังบ้านกับหมู่บ้านจัดสรรไม่ควรใช้เกณฑ์เดียวกัน) แต่ค่าที่ไม่ได้ตั้งต้อง
+   * ให้ผลเหมือนเดิมเป๊ะ ไม่งั้น migration จะเปลี่ยนพฤติกรรมของหมู่บ้านที่ยังไม่ได้แตะ
+   */
+  private thresholdsOf(village: VillageEntity | null): UsageThresholds {
+    const positive = (value: unknown, fallback: number) => {
+      const num = Number(value);
+      return Number.isFinite(num) && num > 0 ? num : fallback;
+    };
+
+    return {
+      warnRatio: positive(
+        village?.usage_warn_ratio,
+        BillsService.USAGE_WARN_RATIO,
+      ),
+      spikeRatio: positive(
+        village?.usage_spike_ratio,
+        BillsService.USAGE_SPIKE_RATIO,
+      ),
+      floor: positive(
+        village?.usage_spike_floor,
+        BillsService.USAGE_SPIKE_FLOOR,
+      ),
+      hardCap: BillsService.USAGE_HARD_CAP,
+    };
   }
 
   /**
@@ -822,7 +965,18 @@ export class BillsService {
       const digits = Number(reading.meter_digits);
       if (Number.isInteger(digits) && digits > 0) return digits;
     }
-    return null;
+
+    // ยังไม่เคยจดผ่าน OCR เลย — ถอยไปใช้จำนวนหลักที่บันทึกไว้ในทะเบียนมิเตอร์
+    //
+    // ปิดช่องที่เคยเปิดอยู่: ด่านนี้เคยเริ่มทำงานตั้งแต่การจดด้วย OCR **ครั้งที่สอง**
+    // เป็นต้นไป บิลใบแรกของบ้านจึงไม่มีอะไรเทียบเลย ทั้งที่เป็นใบที่เสี่ยงที่สุด
+    // (ยังไม่มีประวัติการใช้น้ำให้ด่านหน่วยพุ่งจับด้วย ใช้เพดาน 1,000 หน่วยที่หลวมมาก)
+    const meter = await this.meterRepository.findOne({
+      where: { members_id: membersId, removed_at: IsNull() },
+      order: { installed_at: 'DESC', id: 'DESC' },
+    });
+    const registered = Number(meter?.digits);
+    return Number.isInteger(registered) && registered > 0 ? registered : null;
   }
 
   /**
@@ -917,25 +1071,36 @@ export class BillsService {
   static readonly DEFAULT_PAYMENT_DUE_DAYS = 15;
 
   /**
+   * หมู่บ้านของบ้านหลังนี้ — null เมื่อยังไม่ได้ผูกหมู่บ้าน หรือหาไม่เจอ
+   *
+   * แยกออกมาเพราะตอนนี้มีสามเรื่องที่ต้องอ่านค่าจากหมู่บ้านเดียวกันในการออกบิล
+   * หนึ่งครั้ง (รอบชำระ, เกณฑ์หน่วยพุ่ง, รัศมี GPS) — ปล่อยให้ต่างคนต่างโหลด
+   * เท่ากับยิงคิวรีซ้ำสามรอบต่อการออกบิลหนึ่งใบ
+   */
+  private async villageOfMember(
+    membersId: number,
+  ): Promise<VillageEntity | null> {
+    const member = await this.memberRepository.findOne({
+      where: { id: membersId },
+    });
+    if (!member?.villages_id) return null;
+
+    return await this.villageRepository.findOne({
+      where: { id: member.villages_id },
+    });
+  }
+
+  /**
    * วันครบกำหนดชำระของบิลใบนี้ = วันจดมิเตอร์ + รอบชำระของหมู่บ้าน
    *
    * นับจากวันจด ไม่ใช่วันที่ 1 ของเดือนบิล เพราะลูกบ้านเริ่มรู้ยอดตอนที่พนักงาน
    * ไปจดถึงหน้าบ้าน — จดวันที่ 28 แล้วให้ครบกำหนดวันที่ 15 ของเดือนเดียวกัน
    * เท่ากับเลยกำหนดตั้งแต่วินาทีที่ออกบิล
    */
-  private async resolveDueDate(
-    membersId: number,
+  private resolveDueDate(
+    village: VillageEntity | null,
     reading_date: Date,
-  ): Promise<Date> {
-    const member = await this.memberRepository.findOne({
-      where: { id: membersId },
-    });
-    const village = member?.villages_id
-      ? await this.villageRepository.findOne({
-          where: { id: member.villages_id },
-        })
-      : null;
-
+  ): Date {
     const days =
       village?.payment_due_days && village.payment_due_days > 0
         ? village.payment_due_days
@@ -974,6 +1139,34 @@ export class BillsService {
   private static readonly STALE_PHOTO_DAYS = 30;
 
   /**
+   * ถ่ายห่างกันไม่เกินนี้ **และ** ยืนอยู่ที่เดิม = กดชัตเตอร์รัว ไม่ใช่คนละมิเตอร์
+   *
+   * 3 วินาทีมาจากเวลาที่ใช้เดินจากมิเตอร์หนึ่งไปอีกหลัง — ต่อให้บ้านติดกัน
+   * ที่ pitch แคบสุด (ทาวน์โฮม 4 ม.) ก็ยังต้องเดินและเล็งกล้องใหม่
+   */
+  static readonly BURST_WINDOW_MS = 3000;
+
+  /**
+   * ขยับไม่ถึงระยะนี้ถือว่า "ยืนที่เดิม"
+   *
+   * 5 ม. เล็กกว่าระยะห่างระหว่างมิเตอร์ที่แคบที่สุด (ทาวน์โฮม 4-8 ม.) เล็กน้อย
+   * ตั้งกว้างกว่านี้จะเริ่มปฏิเสธคนที่ถ่ายสองบ้านติดกันจริง ๆ
+   */
+  static readonly BURST_MOVE_M = 5;
+
+  /**
+   * นาฬิกาเครื่องเดินเร็วกว่า server ได้กี่นาทีก่อนถือว่าผิด
+   *
+   * มือถือกับ server คลาดกันไม่กี่วินาทีเป็นปกติ (คนละ NTP หรือไม่ได้ซิงก์มานาน)
+   * เผื่อ 5 นาทีจึงกว้างพอสำหรับความคลาดจริง แต่แคบพอจะจับ "ตั้งเวลาเครื่อง
+   * ล่วงหน้าเพื่อให้รูปเก่าดูเหมือนถ่ายวันนี้" ซึ่งคลาดเป็นชั่วโมงหรือเป็นวันเสมอ
+   */
+  static readonly FUTURE_CLOCK_SKEW_MIN = 5;
+
+  /** ถ่ายไว้เกินกี่ชั่วโมงก่อนส่งเข้าระบบจึงติดธงเตือน (ไม่บล็อก) */
+  static readonly PHOTO_AGE_WARN_HOURS = 24;
+
+  /**
    * กันรูปเก่า/รูปใช้ซ้ำ — ตรวจสองชั้นจากข้อมูลที่มีอยู่แล้วในตาราง
    *
    * ═══ ชั้นที่ 1: captured_at ซ้ำเป๊ะ = ไฟล์เดียวกันแน่นอน ═══
@@ -1010,6 +1203,67 @@ export class BillsService {
           billError(
             BILL_ERROR_CODES.PHOTO_REUSED,
             `รูปนี้ถ่ายเมื่อ ${captured_at.toLocaleString('th-TH')} ซึ่งตรงกับการจดมิเตอร์ที่บันทึกไว้แล้ว (รหัสการจด ${sameShot.id}) — เป็นไฟล์รูปเดิมที่เคยใช้ไปแล้ว กรุณาถ่ายรูปหน้าปัดใหม่ครับ`,
+            409,
+          ),
+        );
+      }
+    }
+
+    // ═══ ชั้นที่ 1.5: ถ่ายรัวหลายใบที่จุดเดียวกัน — บล็อกตาย ═══
+    //
+    // ชั้นที่ 1 จับได้เฉพาะไฟล์เดิมเป๊ะ ๆ แต่การกดชัตเตอร์รัว 5 ครั้งได้ 5 ไฟล์ที่
+    // captured_at ต่างกัน 0.3-0.8 วินาที ซึ่งลอดชั้นที่ 1 ไปทั้งหมด
+    //
+    // เกณฑ์ต้องใช้ทั้งเวลา **และ** ระยะ ไม่ใช่เวลาอย่างเดียว — สองบ้านที่มิเตอร์
+    // ติดกำแพงเดียวกัน (ทาวน์โฮม/ห้องเช่า) ถ่ายห่างกัน 2-3 วินาทีเป็นเรื่องปกติจริง
+    // การดูเวลาอย่างเดียวจะปฏิเสธคนที่ทำงานเร็ว ส่วนการดูระยะอย่างเดียวก็ปฏิเสธ
+    // การกลับไปถ่ายซ้ำที่มิเตอร์เดิมในวันหลัง
+    if (captured_at) {
+      const from = new Date(
+        captured_at.getTime() - BillsService.BURST_WINDOW_MS,
+      );
+      const to = new Date(captured_at.getTime() + BillsService.BURST_WINDOW_MS);
+
+      const nearby = await this.meterReadingRepository.find({
+        where: { captured_at: Between(from, to) },
+      });
+
+      for (const shot of nearby) {
+        if (shot.id === params.excludeReadingId) continue;
+        if (!shot.captured_at) continue;
+
+        // ต้องเช็คด้วย isFinite ไม่ใช่ `=== null` — คอลัมน์ decimal ที่ไม่ได้ select
+        // มาจะเป็น undefined ซึ่งลอดการเทียบกับ null ไปได้ แล้ว Number(undefined)
+        // เป็น NaN ทำให้ `NaN > 5` เป็น false = ไม่ continue = ฟ้องว่าถ่ายรัวทั้งที่
+        // ไม่มีพิกัดให้เทียบเลยสักค่า (ด่านที่ฟ้องผิดอันตรายกว่าด่านที่ไม่มี)
+        const here = { lat: Number(latitude), lng: Number(longitude) };
+        const there = {
+          lat: Number(shot.latitude),
+          lng: Number(shot.longitude),
+        };
+        if (
+          !Number.isFinite(here.lat) ||
+          !Number.isFinite(here.lng) ||
+          !Number.isFinite(there.lat) ||
+          !Number.isFinite(there.lng)
+        ) {
+          continue;
+        }
+
+        const moved = PhotoMetadataService.distanceMeters(
+          { latitude: here.lat, longitude: here.lng },
+          { latitude: there.lat, longitude: there.lng },
+        );
+        if (moved > BillsService.BURST_MOVE_M) continue;
+
+        const gapSeconds =
+          Math.abs(
+            captured_at.getTime() - new Date(shot.captured_at).getTime(),
+          ) / 1000;
+        throw new ConflictException(
+          billError(
+            BILL_ERROR_CODES.BURST_PHOTO,
+            `รูปนี้ถ่ายห่างจากการจดมิเตอร์ที่บันทึกไว้แล้ว (รหัสการจด ${shot.id}) เพียง ${gapSeconds.toFixed(1)} วินาที และอยู่ห่างกันแค่ ${Math.round(moved)} เมตร — เท่ากับยืนอยู่ที่เดิมแล้วกดชัตเตอร์รัว ไม่ใช่การเดินไปถ่ายมิเตอร์อีกหลัง กรุณาเดินไปถ่ายที่หน้ามิเตอร์ของบ้านนั้นจริง ๆ ครับ`,
             409,
           ),
         );
@@ -1066,6 +1320,48 @@ export class BillsService {
   }
 
   /**
+   * เวลาถ่ายที่เป็นอนาคต — **บล็อกตาย** / ถ่ายค้างไว้เกินหนึ่งวัน — ติดธงเตือน
+   *
+   * ═══ ทำไมอนาคตบล็อกตาย แต่อดีตแค่เตือน ═══
+   *
+   * เวลาในอนาคตไม่มีสถานการณ์ที่ถูกต้องเลย — ภาพยังไม่เกิดขึ้นแต่มีไฟล์แล้ว
+   * แปลว่านาฬิกาเครื่องผิด (ซึ่งต้องแก้ก่อน ไม่งั้น captured_at ของทุกใบที่ถ่าย
+   * วันนี้จะเชื่อไม่ได้ทั้งหมด) หรือถูกตั้งล่วงหน้าเพื่อให้รูปเก่าดูใหม่
+   *
+   * ส่วนอดีตเกิดขึ้นจริงตลอด — ถ่ายไว้ตอนไม่มีสัญญาณแล้วค่อยซิงก์ตอนกลับถึงที่ทำการ
+   * เป็นพฤติกรรมปกติของ offline mode ด้วยซ้ำ จึงติดธงไว้เฉย ๆ ให้ไล่ดูย้อนหลังได้
+   * (ส่วนที่เก่าเกิน 30 วันมีด่าน confirm_stale_photo คุมอีกชั้นอยู่แล้ว)
+   */
+  private assertCapturedAtSane(captured_at: Date | null): PendingFlag[] {
+    if (!captured_at) return [];
+
+    const now = Date.now();
+    const skewMs = BillsService.FUTURE_CLOCK_SKEW_MIN * 60_000;
+
+    if (captured_at.getTime() > now + skewMs) {
+      throw new BadRequestException(
+        billError(
+          BILL_ERROR_CODES.FUTURE_TIMESTAMP,
+          `เวลาที่ถ่ายรูป (${captured_at.toLocaleString('th-TH')}) เป็นเวลาในอนาคต — แปลว่านาฬิกาของเครื่องที่ถ่ายตั้งไม่ตรง กรุณาตั้งวันเวลาของเครื่องให้ถูกต้องแล้วถ่ายใหม่ครับ (ถ้าไม่แก้ เวลาของรูปทุกใบที่ถ่ายด้วยเครื่องนี้จะเชื่อถือไม่ได้)`,
+          400,
+        ),
+      );
+    }
+
+    const ageHours = (now - captured_at.getTime()) / 3_600_000;
+    if (ageHours > BillsService.PHOTO_AGE_WARN_HOURS) {
+      return [
+        {
+          flag_type: 'stale_photo',
+          detail: `ถ่ายไว้ ${Math.round(ageHours)} ชั่วโมงก่อนส่งเข้าระบบ (${captured_at.toLocaleString('th-TH')})`,
+        },
+      ];
+    }
+
+    return [];
+  }
+
+  /**
    * ตรวจทุกเงื่อนไขและคำนวณยอด — **ไม่เขียนอะไรลงฐานข้อมูลเลย**
    *
    * แยกออกมาเพื่อให้ createFromScan() ตรวจให้จบก่อนแล้วค่อยเขียน
@@ -1088,6 +1384,14 @@ export class BillsService {
     read_confidence?: number;
     confirm_low_confidence?: boolean;
     excludeReadingId?: number;
+    /** เลขมาจาก OCR หรือคนกรอกเอง — 'manual*' บังคับต้องมีรูปหน้าปัด */
+    entry_method?: string;
+    /** มีรูปแนบมาด้วยไหม (ยังไม่เขียนไฟล์ตอนนี้ แค่รู้ว่ามี) */
+    has_photo?: boolean;
+    /** admin.id ของคนที่กดยืนยันข้ามด่าน — ติดไว้กับธงเพื่อให้ไล่ดูได้ว่าใครกด */
+    confirmed_by?: number | null;
+    /** บิลปิดยอดตอนย้ายออก — ข้ามการทบยอดค้าง เพราะทบเองอยู่แล้วในเส้นทางนั้น */
+    skip_arrears?: boolean;
   }) {
     // ตรวจเดือน/ปีก่อนทุกอย่าง — คิวรีหาบิลซ้ำและการเทียบลำดับเดือนข้างล่างพึ่งค่านี้ทั้งหมด
     // ตั้งแต่บรรทัดนี้ลงไปใช้ billing_month/billing_year ของ period เท่านั้น (เติมศูนย์แล้ว)
@@ -1174,11 +1478,32 @@ export class BillsService {
       params.excludeReadingId,
     );
 
+    // มิเตอร์ตัวเก่าที่ถอดไปแล้วแต่หน่วยค้างยังไม่ได้คิดเงิน
+    //
+    // ═══ ทำไมต้องหาเอง ไม่รอให้หน้าเว็บส่ง old_meter_final_unit มา ═══
+    //
+    // คนที่เปลี่ยนมิเตอร์ (ช่าง/ผู้ใหญ่บ้าน) กับคนที่เดินจดรอบถัดไปมักไม่ใช่คนเดียวกัน
+    // และห่างกันเป็นสัปดาห์ คนจดจึงไม่มีทางรู้เลขปิดของตัวที่ถูกถอดไปแล้ว
+    // ถ้ารอให้กรอกมา หน่วยก้อนนั้นจะหายเงียบ ๆ ทุกครั้งที่เปลี่ยนมิเตอร์
+    const pendingMeter = await this.meterRepository.findOne({
+      where: {
+        members_id: params.membersId,
+        residual_billed_at: IsNull(),
+        removed_at: Not(IsNull()),
+        final_unit: Not(IsNull()),
+      },
+      order: { removed_at: 'DESC', id: 'DESC' },
+    });
+
     const { previous_unit, usage_unit, meter_reset } = this.resolveUsage({
       current_unit: params.current_unit,
       previous_unit: baseline.previous_unit,
-      confirm_meter_reset: params.confirm_meter_reset,
-      old_meter_final_unit: params.old_meter_final_unit,
+      // ทะเบียนมิเตอร์มีบันทึกว่าถอดตัวเก่าไปแล้ว = ยืนยันการเปลี่ยนมิเตอร์ในตัว
+      // ไม่ต้องให้คนหน้างานกดยืนยันซ้ำในสิ่งที่ระบบรู้อยู่แล้ว
+      confirm_meter_reset: params.confirm_meter_reset || Boolean(pendingMeter),
+      // ค่าที่คนกรอกมาเองชนะเสมอ — คนที่ยืนอยู่หน้ามิเตอร์เห็นของจริง
+      old_meter_final_unit:
+        params.old_meter_final_unit ?? pendingMeter?.final_unit ?? undefined,
     });
 
     // เดือนที่ข้ามไปไม่มีบิล = บิลใบนี้กินหลายเดือน ต้องรู้ก่อนตรวจด่านหน่วยพุ่ง
@@ -1189,14 +1514,68 @@ export class BillsService {
       period.month,
     );
 
-    this.assertUsageLooksSane(
+    // โหลดหมู่บ้านครั้งเดียว ใช้ทั้งเกณฑ์หน่วยพุ่งและรอบชำระ
+    const village = await this.villageOfMember(params.membersId);
+
+    const flags: PendingFlag[] = this.assertUsageLooksSane(
       usage_unit,
       otherBills,
       params.confirm_high_usage,
       period_months,
+      this.thresholdsOf(village),
+      params.confirmed_by,
     );
 
-    const due_date = await this.resolveDueDate(params.membersId, reading_date);
+    // กรอกเลขเองต้องมีรูปเสมอ — ตรวจหลังด่านตัวเลขทั้งหมด เพราะเป็นเรื่องหลักฐาน
+    // ไม่ใช่ความถูกต้องของตัวเลข ถ้าตรวจก่อนคนจะเห็นแต่ข้อความเรื่องรูป
+    // ทั้งที่เลขที่กรอกมาผิดตั้งแต่ต้นอยู่แล้ว
+    const entry_method = this.assertEntryMethod({
+      entry_method: params.entry_method,
+      has_photo: params.has_photo,
+      read_confidence: params.read_confidence,
+    });
+    if (entry_method !== 'ocr') {
+      flags.push({
+        flag_type: 'manual_entry',
+        detail: `กรอกเลข ${params.current_unit.toLocaleString('th-TH')} ด้วยมือ (${entry_method})`,
+        confirmed_by: params.confirmed_by ?? null,
+      });
+    }
+    if (meter_reset) {
+      flags.push({
+        flag_type: 'meter_reset',
+        detail:
+          `เลขที่จด ${params.current_unit} ต่ำกว่าเลขตั้งต้น ${baseline.previous_unit}` +
+          (params.old_meter_final_unit !== undefined
+            ? ` — เลขปิดมิเตอร์เก่า ${params.old_meter_final_unit}`
+            : ' — ไม่ได้กรอกเลขปิดมิเตอร์เก่า คิดเฉพาะตัวใหม่'),
+        confirmed_by: params.confirmed_by ?? null,
+      });
+    }
+    if (params.confirm_digit_change) {
+      flags.push({
+        flag_type: 'digit_change',
+        detail: `จำนวนหลักเปลี่ยนเป็น ${params.meter_digits ?? '-'} — กดยืนยันผ่าน`,
+        confirmed_by: params.confirmed_by ?? null,
+      });
+    }
+    if (params.confirm_low_confidence) {
+      flags.push({
+        flag_type: 'low_confidence',
+        detail: `OCR มั่นใจ ${params.read_confidence ?? '-'} — กดยืนยันผ่าน`,
+        confirmed_by: params.confirmed_by ?? null,
+      });
+    }
+
+    const due_date = this.resolveDueDate(village, reading_date);
+
+    // ยอดค้างสะสมของบ้านหลังนี้ ณ วินาทีนี้ — ตัดใบที่กำลังจะถูกจดทับออก
+    // ไม่งั้นตอนกด "จดทับ" ยอดของใบเดิมจะถูกทบเข้าไปในใบที่มาแทนที่ตัวมันเอง
+    const arrears = params.skip_arrears
+      ? { arrears_amount: 0, covered: [] as BillEntity[] }
+      : this.resolveArrears(otherBills);
+
+    const total_amount = usage_unit * Number(rate.price_per_unit);
 
     return {
       rate,
@@ -1209,14 +1588,97 @@ export class BillsService {
       meter_digits,
       // ปัดเป็น 3 ตำแหน่งแล้ว (หรือ null เมื่อกรอกมือ) ลงคอลัมน์ decimal(4,3) ได้เลย
       read_confidence,
+      entry_method,
       period_months,
       due_date,
+      village,
+      /** มิเตอร์ตัวเก่าที่หน่วยค้างถูกคิดเข้าบิลใบนี้ — ผู้เรียกต้องมาร์กว่าคิดแล้ว */
+      residual_meter: meter_reset ? pendingMeter : null,
+      // ธงที่ต้องเขียนลง reading_flags พร้อมกับการจด (ผู้เรียกต้องส่งต่อเข้าทรานแซกชัน)
+      flags,
       // ผู้เรียกต้องบันทึกสองค่านี้ ไม่ใช่ค่าดิบจาก dto
       billing_month,
       billing_year,
       // price_per_unit เป็น decimal ใน MySQL ซึ่ง TypeORM คืนมาเป็น string ('15.00') ต้องแปลงก่อนคูณ
-      total_amount: usage_unit * Number(rate.price_per_unit),
+      total_amount,
+      arrears_amount: arrears.arrears_amount,
+      arrears_covered: arrears.covered,
+      grand_total: total_amount + arrears.arrears_amount,
     };
+  }
+
+  /**
+   * ยอดค้างสะสมที่จะทบเข้าบิลใบใหม่ + รายชื่อใบเก่าที่ถูกทบ
+   *
+   * ═══ ทำไมต้องรู้ว่าทบใบไหนบ้าง ไม่ใช่แค่ยอดรวม ═══
+   *
+   * ตอนรับเงินต้องปิดใบเก่าทุกใบที่ถูกทบให้เป็น Paid ในทรานแซกชันเดียวกัน
+   * ถ้าไม่ปิด ยอดเดิมจะถูกทบเข้าบิลเดือนถัดไปอีกรอบ กลายเป็นเก็บซ้ำจากก้อนที่จ่ายแล้ว
+   *
+   * ═══ ทำไมไม่บวกเข้า total_amount ไปเลย ═══
+   *
+   * usageBaseline(), outstandingByMember() และรายงานรายได้อ่าน total_amount ว่าเป็น
+   * "ค่าน้ำของรอบเดียว" การเอายอดเก่าไปปนทำให้ยอดค้างถูกนับซ้ำทุกเดือนที่ทบต่อกันไป
+   */
+  private resolveArrears(unpaidCandidates: BillEntity[]): {
+    arrears_amount: number;
+    covered: BillEntity[];
+  } {
+    const covered = unpaidCandidates.filter(
+      (bill) =>
+        bill.payment_status === 'Pending' || bill.payment_status === 'Overdue',
+    );
+
+    return {
+      // decimal ของ MySQL กลับมาเป็น string ต้องแปลงก่อนบวก ไม่งั้นได้การต่อสตริง
+      arrears_amount: covered.reduce(
+        (sum, bill) => sum + Number(bill.total_amount),
+        0,
+      ),
+      covered,
+    };
+  }
+
+  /**
+   * เลขที่กรอกเองต้องมีรูปหน้าปัดแนบมาเสมอ — **บล็อกตาย ไม่มีปุ่มยืนยัน**
+   *
+   * ═══ ทำไมเข้มกว่าด่านอื่นทั้งหมด ═══
+   *
+   * ด่านอื่นเปิดปุ่มยืนยันไว้เพราะยังมีข้อมูลอีกชิ้นให้คนตรวจใช้ตัดสิน (รูป, ประวัติ,
+   * จำนวนหลัก) แต่เลขที่กรอกมือแล้วไม่มีรูป **ไม่เหลืออะไรให้ตรวจเลยแม้แต่ชิ้นเดียว** —
+   * ทั้งระบบต้องเชื่อตัวเลขที่พิมพ์มาล้วน ๆ ซึ่งเป็นสภาพเดียวกับการจดมือลงสมุด
+   * ที่โปรเจกต์นี้ตั้งใจแก้ตั้งแต่ต้น
+   *
+   * ปุ่มยืนยันตรงนี้จึงไม่มีความหมาย — คนที่กดคือคนเดียวกับที่พิมพ์เลขมา
+   */
+  private assertEntryMethod(params: {
+    entry_method?: string;
+    has_photo?: boolean;
+    read_confidence?: number;
+  }): 'ocr' | 'manual' | 'manual_after_ocr_fail' {
+    const declared = params.entry_method?.trim();
+    const method =
+      declared === 'manual' || declared === 'manual_after_ocr_fail'
+        ? declared
+        : declared === 'ocr'
+          ? 'ocr'
+          : // ไม่ประกาศมา = เดาจากว่ามีผล OCR ติดมาไหม เพื่อให้หน้าเว็บรุ่นเก่า
+            // ที่ยังไม่ส่งฟิลด์นี้ยังทำงานได้เหมือนเดิม
+            Number(params.read_confidence) > 0
+            ? 'ocr'
+            : 'manual';
+
+    if (method !== 'ocr' && !params.has_photo) {
+      throw new BadRequestException(
+        billError(
+          BILL_ERROR_CODES.MANUAL_PHOTO_REQUIRED,
+          'การกรอกเลขมิเตอร์เองต้องแนบรูปหน้าปัดมาด้วยเสมอครับ — ไม่มีรูปแล้วจะไม่เหลือหลักฐานอะไรให้ตรวจสอบย้อนหลังได้เลย กรุณาถ่ายรูปหน้าปัดแล้วส่งมาพร้อมกัน',
+          400,
+        ),
+      );
+    }
+
+    return method;
   }
 
   /**
@@ -1273,12 +1735,117 @@ export class BillsService {
   }
 
   /**
+   * บิลที่เกิดจากการจดซึ่งถือ client_uuid นี้อยู่แล้ว — null = ยังไม่เคยซิงก์เข้ามา
+   *
+   * ใช้ตอบคำขอที่ซ้ำจาก offline queue ด้วยผลลัพธ์เดิม แทนที่จะเป็น error
+   * (การตอบ error ทำให้แอปเข้าใจว่ายังไม่สำเร็จแล้วยิงซ้ำไม่รู้จบ)
+   */
+  private async findBillByClientUuid(
+    clientUuid?: string | null,
+  ): Promise<BillEntity | null> {
+    if (!clientUuid) return null;
+
+    const reading = await this.meterReadingRepository.findOne({
+      where: { client_uuid: clientUuid },
+    });
+    if (!reading) return null;
+
+    return await this.billRepository.findOne({
+      where: { meter_readings_id: reading.id },
+    });
+  }
+
+  /** ผูกว่าบิลใบใหม่ทบยอดของใบเก่าใบไหนมาบ้าง (เรียกในทรานแซกชันเดียวกับบิล) */
+  private async linkArrears(
+    manager: EntityManager,
+    billId: number,
+    covered: BillEntity[],
+  ): Promise<void> {
+    if (covered.length === 0) return;
+
+    await manager.save(
+      covered.map((old) =>
+        manager.create(BillArrearsEntity, {
+          bill_id: billId,
+          covered_bill_id: old.id,
+          amount: Number(old.total_amount),
+        }),
+      ),
+    );
+  }
+
+  /**
+   * รับชำระเงินบิลใบหนึ่ง — ปิดใบเก่าที่ถูกทบยอดเข้ามาให้ด้วยทั้งชุด
+   *
+   * ═══ ทำไมปิดใบเก่าพร้อมกันในทรานแซกชันเดียว ═══
+   *
+   * ลูกบ้านจ่ายตามยอด grand_total ซึ่งรวมยอดค้างของใบเก่าไปแล้ว ถ้าปิดแค่ใบใหม่
+   * ใบเก่าจะยังเป็น Pending อยู่ แล้วบิลเดือนถัดไปจะทบยอดเดิมเข้าไปอีกรอบ —
+   * ลูกบ้านโดนเก็บซ้ำจากก้อนที่จ่ายไปแล้ว โดยไม่มีใครสังเกตจนกว่าจะมีคนมาทักท้วง
+   *
+   * ปิดแยกกันทีละใบไม่ได้ เพราะถ้าล้มกลางทางจะเหลือสภาพครึ่ง ๆ ที่แย่กว่าไม่ทำเลย
+   */
+  async payBill(id: number, paidBy?: number) {
+    const bill = await this.billRepository.findOne({ where: { id } });
+    if (!bill) {
+      throw new NotFoundException(`ไม่พบบิลหมายเลข ${id}`);
+    }
+    if (bill.payment_status === 'Paid') {
+      throw new ConflictException(`บิลหมายเลข ${id} ชำระเงินแล้วครับ`);
+    }
+
+    const links = await this.billArrearsRepository.find({
+      where: { bill_id: id },
+    });
+    const coveredIds = links.map((link) => link.covered_bill_id);
+
+    await this.billRepository.manager.transaction(async (manager) => {
+      await manager.update(
+        BillEntity,
+        { id: In([id, ...coveredIds]) },
+        { payment_status: 'Paid', modify_by: paidBy, modify_date: new Date() },
+      );
+    });
+
+    return {
+      message: `รับชำระเงินบิลหมายเลข ${id} เรียบร้อยครับ`,
+      paid_amount: Number(bill.grand_total ?? bill.total_amount),
+      /** บิลเก่าที่ถูกปิดไปพร้อมกัน เพราะยอดของใบพวกนี้ถูกทบไว้ในใบที่จ่าย */
+      settled_bill_ids: coveredIds,
+    };
+  }
+
+  /**
    * จดมิเตอร์ + ออกบิล ในคำสั่งเดียว
    *
    * ตรวจให้ผ่านก่อนค่อยเขียน แล้วเขียนทั้งสองตารางในทรานแซกชันเดียว
    * ถ้าล้มกลางทางจะไม่เหลือ meter_readings ค้าง และไม่มีบิลที่ไม่มีการจดรองรับ
    */
-  async createFromScan(dto: CreateBillFromScanDto) {
+  async createFromScan(
+    dto: CreateBillFromScanDto,
+    /**
+     * ส่วนเพิ่มสำหรับบิลปิดยอดตอนย้ายออก — เรียกจาก TenancyService เท่านั้น
+     *
+     * แยกเป็นพารามิเตอร์ที่สอง ไม่ปนใน dto เพราะสามค่านี้ต้องไม่มีทางมาจาก body
+     * ของผู้ใช้ได้เลย (ตั้ง is_final เองจากหน้าเว็บ = ออกบิลที่ข้ามรอบชำระได้)
+     */
+    options?: {
+      is_final?: boolean;
+      tenancy_id?: number | null;
+      /** ทับ due_date ที่คิดจากรอบชำระของหมู่บ้าน — บิลปิดยอดครบกำหนดวันย้ายออกเลย */
+      due_date?: Date;
+    },
+  ) {
+    // ═══ ยิงซ้ำจาก offline queue = คืนบิลใบเดิม ไม่ใช่ error ═══
+    //
+    // แอปที่ทำงานหน้างานเก็บการจดไว้ในเครื่องแล้วยิงตอนมีเน็ต ปัญหาคือ
+    // "ยิงแล้วเน็ตหลุดก่อนได้รับคำตอบ" แยกไม่ออกจาก "ยิงไม่สำเร็จ" แอปจึงต้องยิงซ้ำ
+    //
+    // ตรวจตรงนี้เป็นแค่ทางลัดให้ตอบเร็ว — ตัวที่กันจริงคือ UNIQUE KEY ของ
+    // client_uuid ในฐานข้อมูล เพราะสองคำขอที่มาพร้อมกันจะ SELECT ไม่เจอทั้งคู่
+    const synced = await this.findBillByClientUuid(dto.client_uuid);
+    if (synced) return synced;
+
     const prep = await this.prepareBill({
       membersId: dto.members_id,
       water_rates_id: dto.water_rates_id,
@@ -1287,6 +1854,9 @@ export class BillsService {
       billing_year: dto.billing_year,
       reading_date: dto.reading_date,
       replace: dto.replace,
+      entry_method: dto.entry_method,
+      has_photo: Boolean(dto.meter_photo),
+      confirmed_by: dto.create_by ?? null,
       confirm_high_usage: dto.confirm_high_usage,
       confirm_meter_reset: dto.confirm_meter_reset,
       confirm_digit_change: dto.confirm_digit_change,
@@ -1298,6 +1868,32 @@ export class BillsService {
 
     // ตรวจพิกัดก่อนเขียนไฟล์รูป — ตกด่านนี้แล้วจะได้ไม่มีไฟล์ค้างให้ต้องตามลบ
     const location = this.parseLocation(dto);
+
+    // เวลาถ่ายที่เป็นอนาคตบล็อกตาย ส่วนที่เก่ากว่าหนึ่งวันติดธงไว้เฉย ๆ
+    const flags: PendingFlag[] = [
+      ...prep.flags,
+      ...this.assertCapturedAtSane(location.captured_at),
+    ];
+    if (dto.confirm_duplicate_location) {
+      flags.push({
+        flag_type: 'duplicate_location',
+        detail: `พิกัด ${location.latitude ?? '-'}, ${location.longitude ?? '-'} ซ้ำกับการจดที่มีอยู่ — กดยืนยันผ่าน`,
+        confirmed_by: dto.create_by ?? null,
+      });
+    }
+    if (dto.confirm_stale_photo) {
+      flags.push({
+        flag_type: 'stale_photo',
+        detail: `รูปเก่ากว่าวันจดเกิน ${BillsService.STALE_PHOTO_DAYS} วัน — กดยืนยันผ่าน`,
+        confirmed_by: dto.create_by ?? null,
+      });
+    }
+    if (dto.client_uuid) {
+      flags.push({
+        flag_type: 'offline_sync',
+        detail: `ซิงก์จากเครื่องที่บันทึกไว้ตอนไม่มีสัญญาณ (${dto.client_uuid})`,
+      });
+    }
 
     // ด่านกันรูปเก่า/รูปใช้ซ้ำ — ต้องอยู่หลัง parseLocation (ใช้ค่าที่แปลงแล้ว)
     // และก่อนเขียนไฟล์ ด้วยเหตุผลเดียวกับด่านพิกัด
@@ -1356,18 +1952,30 @@ export class BillsService {
           }
 
           const now = new Date();
+
+          // มิเตอร์ตัวที่ใช้อยู่ตอนนี้ของบ้านหลังนี้ — ไม่มีทะเบียนก็ปล่อย null
+          // (บ้านที่ยังไม่เคยลงทะเบียนมิเตอร์ยังออกบิลได้ตามปกติ)
+          const activeMeter = await manager.findOne(MeterEntity, {
+            where: { members_id: dto.members_id, removed_at: IsNull() },
+            order: { installed_at: 'DESC', id: 'DESC' },
+          });
+
           const reading = await manager.save(
             manager.create(MeterReadingEntity, {
               // ตรวจและแปลงมาแล้วใน prepareBill() — ไม่แปลงซ้ำที่นี่
               reading_date: prep.reading_date,
               meter_unit: dto.current_unit,
               members_id: dto.members_id,
+              meters_id: activeMeter?.id ?? null,
               create_by: dto.create_by,
               create_date: now,
               // ตรวจแล้วใน prepareBill() — null เมื่อกรอกเลขเอง ไม่ได้ผ่าน OCR
               meter_digits: prep.meter_digits,
               // เก็บไว้เป็นหลักฐานว่าตอนออกบิลระบบมั่นใจแค่ไหน ไม่ใช่แค่ตรวจแล้วทิ้ง
               read_confidence: prep.read_confidence,
+              entry_method: prep.entry_method,
+              // รหัสจากมือถือ — UNIQUE ระดับ DB คือสิ่งที่กันบิลซ้ำตอน auto-sync จริง
+              client_uuid: dto.client_uuid ?? null,
               // รูปผูกกับ "การจดครั้งนี้" ไม่ใช่กับบิล เพราะบิลออกใหม่ทับได้
               // แต่การจดคือเหตุการณ์ที่เกิดครั้งเดียวและรูปเป็นหลักฐานของเหตุการณ์นั้น
               ...(photoPath ? { evidence_photo: photoPath } : {}),
@@ -1377,6 +1985,10 @@ export class BillsService {
             }),
           );
 
+          // ธงต้องอยู่ในทรานแซกชันเดียวกับการจด ไม่งั้นจะเหลือธงที่ชี้ไปแถวที่ rollback ไปแล้ว
+          // (หรือแย่กว่า: บิลผ่านแต่ธงหาย = บิลที่ดูสะอาดทั้งที่กดข้ามด่านมา)
+          await this.readingFlagsService.record(manager, reading.id, flags);
+
           const newBill = manager.create(BillEntity, {
             meter_readings_id: reading.id,
             water_rates_id: dto.water_rates_id,
@@ -1384,17 +1996,36 @@ export class BillsService {
             current_unit: dto.current_unit,
             usage_unit: prep.usage_unit,
             total_amount: prep.total_amount,
+            // ยอดค้างเก่าแยกคอลัมน์ ไม่ปนกับค่าน้ำของเดือนนี้ (ดูคอมเมนต์ใน BillEntity)
+            arrears_amount: prep.arrears_amount,
+            grand_total: prep.grand_total,
             // เติมศูนย์แล้วจาก prepareBill ไม่ใช่ค่าดิบจาก dto
             billing_month: prep.billing_month,
             billing_year: prep.billing_year,
-            due_date: prep.due_date,
+            due_date: options?.due_date ?? prep.due_date,
             period_months: prep.period_months,
+            tenancy_id: options?.tenancy_id ?? null,
+            is_final: options?.is_final ? 1 : 0,
             payment_status: 'Pending' as const,
             create_by: dto.create_by,
             create_date: now,
           });
 
-          return { bill: await manager.save(newBill), orphanedPhoto };
+          const saved = await manager.save(newBill);
+
+          // ผูกว่าบิลใบนี้ทบยอดของใบไหนมาบ้าง — ตอนรับเงินต้องปิดใบเก่าทั้งชุด
+          await this.linkArrears(manager, saved.id, prep.arrears_covered);
+
+          // มาร์กว่าหน่วยค้างของมิเตอร์ตัวเก่าถูกคิดไปแล้ว ไม่งั้นบิลเดือนหน้า
+          // จะบวกก้อนเดิมเข้าไปอีก (เก็บซ้ำทุกเดือนจนกว่าจะมีคนสังเกต)
+          if (prep.residual_meter) {
+            await manager.update(MeterEntity, prep.residual_meter.id, {
+              residual_billed_at: now,
+              residual_bill_id: saved.id,
+            });
+          }
+
+          return { bill: saved, orphanedPhoto };
         },
       );
       bill = result.bill;
@@ -1407,6 +2038,374 @@ export class BillsService {
 
     await this.meterPhotoService.remove(replacedPhoto);
     return bill;
+  }
+
+  /** ค่าจาก multipart มาเป็นสตริงเสมอ — 'true'/'1'/'on' ถือว่าติ๊กมา นอกนั้นไม่ */
+  private static asFlag(value: unknown): boolean {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'number') return value === 1;
+    if (typeof value !== 'string') return false;
+
+    const text = value.trim().toLowerCase();
+    return text === 'true' || text === '1' || text === 'on';
+  }
+
+  /** ค่าที่ผู้ใช้ส่งมา ในรูปแบบที่เอาไปใส่ข้อความ error ได้โดยไม่กลายเป็น [object Object] */
+  private static asText(value: unknown): string {
+    return typeof value === 'string' || typeof value === 'number'
+      ? String(value)
+      : '';
+  }
+
+  /** วันที่จาก DB มาได้ทั้ง Date และสตริง 'YYYY-MM-DD' — เทียบกับ "วันนี้" ตามเวลาเครื่อง */
+  private static isToday(value: Date | string | null | undefined): boolean {
+    if (!value) return false;
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const local = (d: Date) =>
+      `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+    const text =
+      value instanceof Date ? local(value) : String(value).slice(0, 10);
+    return text === local(new Date());
+  }
+
+  /**
+   * ใครแก้เลขมิเตอร์ของบิลใบไหนได้บ้าง
+   *
+   * ═══ ทำไม staff ถึงถูกจำกัด ═══
+   *
+   * การแก้เลขมิเตอร์คือการเปลี่ยนยอดเงินของใบที่ออกไปแล้ว คนเดินจดต้องแก้ของ
+   * ที่เพิ่งจดผิดเมื่อกี้ได้ (ไม่งั้นต้องรอ owner ว่างทุกครั้งที่พิมพ์เลขพลาด)
+   * แต่ **ไม่ควรแก้ใบที่เลยกำหนดชำระไปแล้ว** ซึ่งเป็นใบที่คนกำลังตามเก็บเงินอยู่ —
+   * ยอดที่ขยับตอนนั้นคือยอดที่ไม่มีใครสังเกต
+   *
+   * owner แก้ได้ตลอดเพราะเป็นคนที่ต้องรับผิดชอบเมื่อลูกบ้านทักท้วงย้อนหลัง
+   */
+  private assertMayEditReading(
+    bill: BillEntity,
+    reading: MeterReadingEntity,
+    adminRole: AdminRole,
+  ): void {
+    if (adminRole === 'owner') return;
+
+    if (
+      BillsService.isToday(reading.reading_date) ||
+      bill.payment_status === 'Pending'
+    ) {
+      return;
+    }
+
+    throw new ForbiddenException(
+      `บิลเดือน ${bill.billing_month}/${bill.billing_year} ใบนี้เลยกำหนดชำระไปแล้วและไม่ได้จดวันนี้ ต้องให้เจ้าของระบบเป็นคนแก้ครับ`,
+    );
+  }
+
+  /**
+   * แก้เลขมิเตอร์ของบิลที่ออกไปแล้ว แล้วคิดยอดใหม่ทั้งสาย
+   *
+   * ═══ ทำไมไม่ใช้ "จดทับ" (POST /bills/scan ด้วย replace) แทน ═══
+   *
+   * จดทับ = ลบบิลใบเดิมกับการจดทิ้งแล้วสร้างใหม่ ซึ่งทำให้ id เปลี่ยน ร่องรอยเดิมหาย
+   * และต้องส่งข้อมูลการจดมาครบทั้งชุด (พิกัด เวลาถ่าย ความมั่นใจ OCR) ทั้งที่คนแก้
+   * นั่งอยู่หน้าคอม ไม่ได้ยืนอยู่หน้ามิเตอร์ ทางนี้จึงแก้เฉพาะ "ตัวเลขที่อ่านผิด"
+   * โดยคงหลักฐานของการเดินไปจดครั้งนั้นไว้ทั้งหมด
+   *
+   * ═══ อะไรที่ตั้งใจไม่แตะ ═══
+   *
+   *   - พิกัด/เวลาถ่าย — รูปที่แนบมาผ่านการครอปจากหน้าเว็บแล้วจึงไม่มี EXIF
+   *     เอามาอัปเดตอะไรไม่ได้เลย และการเดินไปจดเกิดขึ้นจริงตามพิกัดเดิม
+   *   - ยอดค้าง (arrears_amount) ของใบนี้เอง — เป็นภาพนิ่งของใบเก่า ณ วันออกบิล
+   *     ไม่เกี่ยวกับเลขที่อ่านผิด แต่ **ใบที่ทบยอดใบนี้ไปแล้วต้องถูกคิดใหม่** (ดูข้างล่าง)
+   */
+  async updateReading(
+    billId: number,
+    input: {
+      current_unit: unknown;
+      reason?: string;
+      /** รูปหน้าปัดใหม่เป็น data URL — ไม่ส่งมา = ใช้รูปเดิมต่อ */
+      photo?: string | null;
+      confirm_high_usage?: unknown;
+      confirm_meter_reset?: unknown;
+    },
+    actor: { id: number | null; admin_role: AdminRole },
+  ): Promise<{
+    usage_unit: number;
+    total_amount: number;
+    grand_total: number;
+  }> {
+    const bill = await this.billRepository.findOne({ where: { id: billId } });
+    if (!bill) {
+      throw new NotFoundException(`ไม่พบบิลหมายเลข ${billId}`);
+    }
+
+    // เหตุผลต้องมาก่อนทุกอย่าง — ตกด่านนี้แล้วจะได้ไม่มีอะไรถูกแตะเลย
+    const reason = (input.reason ?? '').trim();
+    if (!reason) {
+      throw new BadRequestException(
+        'กรุณาระบุเหตุผลที่แก้เลขมิเตอร์ครับ — การแก้ยอดเงินที่ไม่มีเหตุผลกำกับจะตรวจสอบย้อนหลังไม่ได้เลย',
+      );
+    }
+    if (reason.length > 500) {
+      throw new BadRequestException(
+        'เหตุผลยาวเกินไป กรุณาสรุปให้อยู่ใน 500 ตัวอักษรครับ',
+      );
+    }
+
+    const current_unit = Number(input.current_unit);
+    if (!Number.isInteger(current_unit) || current_unit < 0) {
+      throw new BadRequestException(
+        `เลขมิเตอร์ "${BillsService.asText(input.current_unit)}" ไม่ถูกต้อง ต้องเป็นจำนวนเต็มไม่ติดลบครับ`,
+      );
+    }
+
+    // จ่ายเงินแล้วห้ามแก้ **แม้จะเป็น owner** — ยอดที่ลูกบ้านจ่ายไปแล้วต้องตรงกับ
+    // ใบที่ถืออยู่เสมอ ถ้าจะแก้จริงต้องกดปรับสถานะกลับเป็นรอชำระก่อน ซึ่งเป็นการ
+    // ตัดสินใจแยกอีกครั้งที่ทิ้งร่องรอยไว้เอง (และทำให้เห็นว่ามีการเปิดใบที่ปิดไปแล้ว)
+    if (bill.payment_status === 'Paid') {
+      throw new ConflictException(
+        billError(
+          BILL_ERROR_CODES.BILL_PAID,
+          `บิลหมายเลข ${billId} ชำระเงินแล้ว แก้เลขมิเตอร์ไม่ได้ครับ — ถ้าต้องแก้จริงให้กดปรับสถานะกลับเป็น "รอชำระเงิน" ก่อน`,
+          409,
+        ),
+      );
+    }
+
+    const reading = await this.meterReadingRepository.findOne({
+      where: { id: bill.meter_readings_id },
+    });
+    if (!reading) {
+      throw new NotFoundException(
+        `ไม่พบการจดมิเตอร์ของบิลหมายเลข ${billId} — บิลใบนี้เสียหาย กรุณาแจ้งผู้ดูแลระบบครับ`,
+      );
+    }
+
+    this.assertMayEditReading(bill, reading, actor.admin_role);
+
+    const rate = await this.waterRateRepository.findOne({
+      where: { id: bill.water_rates_id },
+    });
+    if (!rate) {
+      throw new NotFoundException('ไม่พบข้อมูลเรทค่าน้ำที่ระบุในระบบ');
+    }
+
+    const confirm_high_usage = BillsService.asFlag(input.confirm_high_usage);
+    const confirm_meter_reset = BillsService.asFlag(input.confirm_meter_reset);
+
+    // เลขตั้งต้นของเดือนนี้ — ตัดการจดของบิลใบนี้เองออก ไม่งั้นจะเอาเลขที่กำลังแก้
+    // มาเป็นตัวตั้งของตัวเอง
+    const baseline = await this.getPreviousUnit(
+      reading.members_id,
+      bill.billing_month,
+      bill.billing_year,
+      reading.id,
+    );
+
+    // หน่วยค้างของมิเตอร์ตัวเก่าที่ถูกคิดเข้า **บิลใบนี้** ไปแล้วตอนออกบิล
+    // ถ้าไม่เอากลับมาบวก การแก้เลขจะทำให้ก้อนนั้นหายเงียบ ๆ (ลูกบ้านได้ส่วนลดฟรี
+    // จากการที่ OCR เคยอ่านผิด ซึ่งไม่ใช่เจตนาของการแก้)
+    const residualMeter = await this.meterRepository.findOne({
+      where: { residual_bill_id: bill.id },
+    });
+    const residual =
+      residualMeter?.final_unit != null
+        ? Math.max(0, residualMeter.final_unit - baseline.previous_unit)
+        : 0;
+
+    let previous_unit = baseline.previous_unit;
+    let usage_unit: number;
+    let meter_reset = false;
+
+    if (current_unit >= previous_unit) {
+      usage_unit = current_unit - previous_unit;
+    } else {
+      if (!confirm_meter_reset) {
+        throw new BadRequestException({
+          statusCode: 400,
+          message: `เลขมิเตอร์ที่แก้ (${current_unit.toLocaleString('th-TH')}) น้อยกว่าเลขตั้งต้นของเดือนก่อน (${previous_unit.toLocaleString('th-TH')}) กรุณาตรวจสอบอีกครั้งครับ — ถ้าเปลี่ยนมิเตอร์ใหม่ หรือมิเตอร์นับครบรอบแล้ววนกลับเป็น 0 ให้กดยืนยันการเปลี่ยนมิเตอร์`,
+          code: READING_EDIT_ERROR_CODES.METER_RESET,
+        });
+      }
+      // เริ่มนับจาก 0 เหมือนตอนออกบิล แล้วบวกหน่วยค้างของตัวเก่ากลับเข้าไป
+      previous_unit = 0;
+      usage_unit = current_unit + residual;
+      meter_reset = true;
+    }
+
+    // ด่านหน่วยพุ่ง — ใช้ตัวเดียวกับตอนออกบิลเป๊ะ ๆ เพื่อให้เกณฑ์สองทางไม่มีวันเพี้ยนจากกัน
+    // แล้วแปลง 409/HIGH_USAGE เป็น 400/high_usage ตามสัญญาของหน้าแก้บิล
+    const otherBills = (await this.billsOfMember(reading.members_id)).filter(
+      (b) => b.id !== bill.id,
+    );
+    const village = await this.villageOfMember(reading.members_id);
+
+    let flags: PendingFlag[];
+    try {
+      flags = this.assertUsageLooksSane(
+        usage_unit,
+        otherBills,
+        confirm_high_usage,
+        bill.period_months,
+        this.thresholdsOf(village),
+        actor.id,
+      );
+    } catch (error) {
+      if (!(error instanceof ConflictException)) throw error;
+
+      const body = error.getResponse() as { message?: string };
+      throw new BadRequestException({
+        statusCode: 400,
+        message: body?.message ?? 'หน่วยน้ำที่คำนวณได้สูงผิดปกติ',
+        code: READING_EDIT_ERROR_CODES.HIGH_USAGE,
+      });
+    }
+
+    if (meter_reset) {
+      flags.push({
+        flag_type: 'meter_reset',
+        detail: `แก้เลขเป็น ${current_unit} ซึ่งต่ำกว่าเลขตั้งต้น ${baseline.previous_unit} — กดยืนยันผ่านตอนแก้บิล`,
+        confirmed_by: actor.id ?? null,
+      });
+    }
+    // เลขที่ถูกพิมพ์เข้ามาเองไม่ได้ผ่าน OCR แล้ว ต้องทิ้งร่องรอยไว้เหมือนการกรอกมือปกติ
+    flags.push({
+      flag_type: 'manual_entry',
+      detail: `แก้เลขมิเตอร์ ${reading.meter_unit} → ${current_unit} (${reason})`,
+      confirmed_by: actor.id ?? null,
+    });
+
+    const old_total_amount = Number(bill.total_amount);
+    const total_amount = usage_unit * Number(rate.price_per_unit);
+    const arrears_amount = Number(bill.arrears_amount ?? 0);
+    const grand_total = total_amount + arrears_amount;
+
+    // เขียนไฟล์รูปก่อนเข้าทรานแซกชัน ด้วยเหตุผลเดียวกับ createFromScan()
+    const photoPath = input.photo
+      ? await this.meterPhotoService.save(input.photo, reading.members_id)
+      : null;
+    const oldPhoto = reading.evidence_photo ?? null;
+
+    try {
+      await this.billRepository.manager.transaction(async (manager) => {
+        const now = new Date();
+
+        await manager.update(MeterReadingEntity, reading.id, {
+          meter_unit: current_unit,
+          // เลขนี้มาจากคนพิมพ์แล้ว ไม่ใช่ผลของ OCR อีกต่อไป — ต้องล้าง meter_digits
+          // และ read_confidence ทิ้งด้วย ไม่งั้นเดือนหน้าด่านจำนวนหลักจะเอาค่าที่ OCR
+          // อ่านได้ตอนที่ "อ่านผิด" มาเป็นตัวเทียบ แล้วบล็อกการจดที่ถูกต้อง
+          meter_digits: null,
+          read_confidence: null,
+          entry_method: 'manual',
+          ...(photoPath
+            ? // มีรูปใหม่ = หลักฐานชุดใหม่ ต้องล้าง photo_purged_at ด้วย
+              // ไม่งั้นหน้าเว็บจะไม่ขึ้นรูปให้ทั้งที่ไฟล์อยู่ครบ
+              { evidence_photo: photoPath, photo_purged_at: null }
+            : {}),
+          modify_by: actor.id ?? undefined,
+          modify_date: now,
+        });
+
+        await manager.update(BillEntity, bill.id, {
+          previous_unit,
+          current_unit,
+          usage_unit,
+          total_amount,
+          grand_total,
+          modify_by: actor.id ?? undefined,
+        });
+
+        // ธงของการแก้ผูกกับการจดครั้งเดิม — หน้าสอบทานจะได้เห็นทั้งตอนออกบิล
+        // และตอนที่มีคนมาแก้ทีหลัง เรียงต่อกันบนการจดใบเดียวกัน
+        await this.readingFlagsService.record(manager, reading.id, flags);
+
+        await this.recalcArrearsCovering(manager, bill.id, total_amount);
+
+        await this.readingLogsService.record(manager, {
+          bills_id: bill.id,
+          meter_readings_id: reading.id,
+          members_id: reading.members_id,
+          old_unit: Number(reading.meter_unit),
+          new_unit: current_unit,
+          old_usage_unit: Number(bill.usage_unit),
+          new_usage_unit: usage_unit,
+          old_total_amount,
+          new_total_amount: total_amount,
+          reason,
+          photo_replaced: Boolean(photoPath),
+          confirmed_flags: [
+            ...(confirm_high_usage
+              ? [READING_EDIT_ERROR_CODES.HIGH_USAGE as string]
+              : []),
+            ...(confirm_meter_reset
+              ? [READING_EDIT_ERROR_CODES.METER_RESET as string]
+              : []),
+          ],
+          changed_by: actor.id ?? null,
+          changed_role: actor.admin_role,
+        });
+      });
+    } catch (error) {
+      // การแก้ไม่สำเร็จ รูปที่เพิ่งเขียนจึงไม่มีเจ้าของ เก็บกวาดก่อนโยน error ต่อ
+      await this.meterPhotoService.remove(photoPath);
+      throw error;
+    }
+
+    // รูปเดิมถูกแทนที่แล้วและ commit ผ่าน — ลบไฟล์ทิ้งได้
+    if (photoPath) {
+      await this.meterPhotoService.remove(oldPhoto);
+    }
+
+    return { usage_unit, total_amount, grand_total };
+  }
+
+  /**
+   * บิลใบใหม่ที่ทบยอดของใบที่เพิ่งถูกแก้ ต้องถูกคิดยอดใหม่ตามไปด้วย
+   *
+   * ═══ ทำไมต้องไล่แก้ต่อ ═══
+   *
+   * bill_arrears.amount เป็นสำเนายอดของใบเก่า ณ วันที่ทบ ถ้าแก้ใบเก่าแล้วไม่ตามแก้
+   * ลูกบ้านจะเห็นบิลเดือนล่าสุดที่ทบ "ยอดที่ไม่มีอยู่จริงแล้ว" มา — และเวลาไปกดรับเงิน
+   * ระบบจะปิดใบเก่าที่ยอดไม่ตรงกับที่เก็บมาจริง
+   *
+   * ข้ามใบที่จ่ายเงินไปแล้ว: ยอดบนใบที่ปิดไปแล้วคือยอดที่รับเงินมาจริง แก้ทีหลัง
+   * เท่ากับเขียนประวัติการรับเงินใหม่ (ปกติเคสนี้ไม่เกิด เพราะการรับเงินปิดใบเก่า
+   * ให้เป็น Paid ทั้งชุด แล้วใบที่ Paid ก็แก้ไม่ได้ตั้งแต่ต้นทางอยู่แล้ว)
+   */
+  private async recalcArrearsCovering(
+    manager: EntityManager,
+    coveredBillId: number,
+    newAmount: number,
+  ): Promise<void> {
+    const links = await manager.find(BillArrearsEntity, {
+      where: { covered_bill_id: coveredBillId },
+    });
+    if (links.length === 0) return;
+
+    for (const link of links) {
+      const laterBill = await manager.findOne(BillEntity, {
+        where: { id: link.bill_id },
+      });
+      if (!laterBill || laterBill.payment_status === 'Paid') continue;
+
+      await manager.update(BillArrearsEntity, link.id, { amount: newAmount });
+
+      // คิดยอดค้างของใบนั้นใหม่จากลิงก์ทั้งชุด ไม่ใช่บวก/ลบส่วนต่าง
+      // เพราะใบเดียวทบมาจากหลายใบได้ และการบวกส่วนต่างจะสะสมความคลาดไปเรื่อย ๆ
+      const siblings = await manager.find(BillArrearsEntity, {
+        where: { bill_id: laterBill.id },
+      });
+      const arrears_amount = siblings.reduce(
+        (sum, row) =>
+          sum + (row.id === link.id ? newAmount : Number(row.amount)),
+        0,
+      );
+
+      await manager.update(BillEntity, laterBill.id, {
+        arrears_amount,
+        grand_total: Number(laterBill.total_amount) + arrears_amount,
+      });
+    }
   }
 
   // ฟังก์ชันสร้างบิลพร้อมคำนวณอัตโนมัติ
@@ -1507,19 +2506,26 @@ export class BillsService {
     //     หารด้วยคาบบิลก่อน ไม่งั้นบิลที่กินหลายเดือนจะเด้งทั้งที่เลขถูก
     const period_months = this.periodMonthsFrom(previousBill, year, month);
 
+    const village = await this.villageOfMember(reading.members_id);
+
+    // ทางนี้ไม่ได้สร้างการจดใหม่ (อ้างแถวที่มีอยู่แล้ว) จึงไม่มีที่ให้ติดธง —
+    // ธงผูกกับ meter_readings.id และแถวนั้นเกิดไปก่อนหน้านี้แล้ว
+    // ด่านที่บล็อกยังทำงานครบเหมือนเดิม ต่างแค่ไม่มีร่องรอยของการกดผ่าน
     this.assertUsageLooksSane(
       usage_unit,
       otherBills,
       createBillDto.confirm_high_usage,
       period_months,
+      this.thresholdsOf(village),
     );
 
-    const due_date = await this.resolveDueDate(
-      reading.members_id,
-      reading.reading_date,
-    );
+    const due_date = this.resolveDueDate(village, reading.reading_date);
 
     const total_amount = usage_unit * Number(rate.price_per_unit);
+
+    // ยอดค้างสะสมของบ้านหลังนี้ — ทางนี้กับ createFromScan ต้องคิดเหมือนกัน
+    // ไม่งั้นบิลที่ออกจากสองหน้าจอจะมียอดบนใบเสร็จไม่ตรงกัน
+    const arrears = this.resolveArrears(otherBills);
 
     // 4. นำข้อมูลมาผูกรวมกัน โดยบังคับใช้ยอดที่เราคำนวณเอง
     //    ตัด replace / confirm_high_usage ทิ้งก่อน เป็นคำสั่งของ request ไม่ใช่คอลัมน์ในตาราง
@@ -1533,6 +2539,8 @@ export class BillsService {
       previous_unit: previous_unit, // เขียนทับด้วยเลขปิดของเดือนก่อนที่หาเอง
       usage_unit: usage_unit, // เขียนทับด้วยค่าที่คำนวณได้
       total_amount: total_amount, // เขียนทับด้วยยอดเงินที่ถูกต้อง
+      arrears_amount: arrears.arrears_amount, // ยอดค้างเก่า แยกจากค่าน้ำเดือนนี้เสมอ
+      grand_total: total_amount + arrears.arrears_amount,
       billing_month, // เขียนทับด้วยค่าที่เติมศูนย์แล้ว ('8' → '08')
       billing_year,
       due_date, // คิดจากวันจด + รอบชำระของหมู่บ้าน ไม่รับจาก body
@@ -1542,8 +2550,14 @@ export class BillsService {
       create_date: new Date(),
     });
 
-    // 5. บันทึกลง Database
-    return await this.billRepository.save(newBill);
+    // 5. บันทึกบิลและการผูกยอดค้างในทรานแซกชันเดียว
+    //    ถ้าบิลบันทึกสำเร็จแต่การผูกล้ม จะเหลือบิลที่เก็บยอดค้างไปแล้วโดยไม่มีใครรู้ว่า
+    //    ทบมาจากใบไหน แล้วตอนรับเงินก็จะปิดใบเก่าไม่ได้ — ยอดเดิมถูกทบซ้ำในเดือนถัดไป
+    return await this.billRepository.manager.transaction(async (manager) => {
+      const saved = await manager.save(newBill);
+      await this.linkArrears(manager, saved.id, arrears.covered);
+      return saved;
+    });
   }
 
   // 🌟 ตาราง bills เก็บแค่ meter_readings_id หน้าเว็บเลยไม่รู้ว่าบิลนี้เป็นของบ้านหลังไหน

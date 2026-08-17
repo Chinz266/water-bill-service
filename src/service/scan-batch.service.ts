@@ -173,6 +173,16 @@ export class ScanBatchService {
    */
   static readonly ALREADY_BILLED_PENALTY = 0.3;
 
+  /**
+   * เกณฑ์ "ถ่ายรัวจากจุดเดิม" — ต้องเข้าทั้งสองข้อพร้อมกัน
+   *
+   * ใช้ค่าเดียวกับ BillsService ที่เป็นด่านบล็อกจริงตอนกดยืนยัน ไม่งั้นหน้านี้จะ
+   * ปล่อยผ่านสิ่งที่ปลายทางบล็อก (หรือเตือนสิ่งที่ปลายทางไม่สนใจ) ซึ่งทำให้
+   * คำเตือนเชื่อถือไม่ได้ทั้งหน้า
+   */
+  static readonly BURST_WINDOW_MS = BillsService.BURST_WINDOW_MS;
+  static readonly BURST_MOVE_M = BillsService.BURST_MOVE_M;
+
   constructor(
     @InjectRepository(MemberEntity)
     private readonly memberRepository: Repository<MemberEntity>,
@@ -260,6 +270,7 @@ export class ScanBatchService {
     }
 
     // ต้องทำหลังครบทุกใบ — เป็นข้อสรุปที่มองใบเดียวแล้วเห็นไม่ได้
+    this.flagBurstPhotos(results);
     this.flagDuplicateSuggestions(results);
 
     const counted = (level: MatchConfidence) =>
@@ -299,6 +310,71 @@ export class ScanBatchService {
    * การเลือกใบที่คะแนนสูงสุดไว้คือการเดาที่ดูน่าเชื่อถือ ซึ่งอันตรายกว่าการบอกว่าไม่รู้
    * (แนวเดียวกับ gpsTiebreak ที่ยอมคืน null เมื่อข้อมูลไม่พอ)
    */
+  /**
+   * รูปหลายใบที่ถ่ายรัวจากจุดเดียวกัน = ยืนที่เดิมกดชัตเตอร์ ไม่ใช่เดินไปถ่ายทีละมิเตอร์
+   *
+   * ═══ ทำไมด่าน "ไฟล์ซ้ำ" จับไม่ได้ ═══
+   *
+   * ด่านนั้นเทียบ captured_at ตรงเป๊ะ ซึ่งจับได้เฉพาะไฟล์เดิมที่ถูกอัปซ้ำ แต่การกด
+   * ชัตเตอร์รัว 5 ครั้งได้ 5 ไฟล์คนละใบที่เวลาต่างกัน 0.3-0.8 วินาที — ลอดไปทั้งหมด
+   *
+   * ═══ ทำไมต้องดูทั้งเวลาและระยะ ═══
+   *
+   * เวลาอย่างเดียว: ทาวน์โฮมที่มิเตอร์ติดกำแพงเดียวกัน ถ่ายห่างกัน 2-3 วินาทีเป็นเรื่องจริง
+   * ระยะอย่างเดียว: การกลับไปถ่ายซ้ำที่มิเตอร์เดิมในวันหลังก็อยู่จุดเดิมเหมือนกัน
+   * ต้องเข้าทั้งสองเงื่อนไขพร้อมกันถึงจะแปลว่ายืนนิ่งกดรัว
+   *
+   * ที่นี่แค่ **เตือน** ไม่บล็อก (เหมือนทุกอย่างใน service นี้) ด่านที่บล็อกจริง
+   * อยู่ที่ `BillsService.assertPhotoNotReused()` ตอนกดยืนยันออกบิล
+   */
+  private flagBurstPhotos(results: ScanBatchItem[]): void {
+    for (let i = 0; i < results.length; i += 1) {
+      const a = results[i];
+      if (!a.photo_taken.captured_at) continue;
+
+      for (let j = i + 1; j < results.length; j += 1) {
+        const b = results[j];
+        if (!b.photo_taken.captured_at) continue;
+
+        const gapMs = Math.abs(
+          a.photo_taken.captured_at.getTime() -
+            b.photo_taken.captured_at.getTime(),
+        );
+        if (gapMs > ScanBatchService.BURST_WINDOW_MS) continue;
+
+        // ไม่มีพิกัดทั้งคู่ = ตัดสินไม่ได้ว่ายืนที่เดิมไหม ปล่อยผ่าน
+        // (ดีกว่าเตือนมั่ว ๆ จนคนเลิกอ่านคำเตือน)
+        if (
+          a.photo_taken.latitude === null ||
+          a.photo_taken.longitude === null ||
+          b.photo_taken.latitude === null ||
+          b.photo_taken.longitude === null
+        ) {
+          continue;
+        }
+
+        const moved = PhotoMetadataService.distanceMeters(
+          {
+            latitude: a.photo_taken.latitude,
+            longitude: a.photo_taken.longitude,
+          },
+          {
+            latitude: b.photo_taken.latitude,
+            longitude: b.photo_taken.longitude,
+          },
+        );
+        if (moved > ScanBatchService.BURST_MOVE_M) continue;
+
+        const note =
+          `รูปที่ ${a.index + 1} กับ ${b.index + 1} ถ่ายห่างกันแค่ ${(gapMs / 1000).toFixed(1)} วินาที ` +
+          `และอยู่ห่างกัน ${Math.round(moved)} เมตร — เท่ากับยืนอยู่ที่เดิมกดชัตเตอร์รัว ` +
+          `ไม่ใช่การเดินไปถ่ายมิเตอร์คนละหลัง จะออกบิลได้ใบเดียวเท่านั้น`;
+        if (!a.warnings.includes(note)) a.warnings.push(note);
+        if (!b.warnings.includes(note)) b.warnings.push(note);
+      }
+    }
+  }
+
   private flagDuplicateSuggestions(results: ScanBatchItem[]): void {
     const byMember = new Map<number, ScanBatchItem[]>();
     for (const item of results) {
@@ -516,6 +592,53 @@ export class ScanBatchService {
    * บ้านที่ทำให้หน่วยน้ำติดลบถูกตัดทิ้งทันที (มิเตอร์เดินถอยหลังไม่ได้)
    * ที่เหลือให้คะแนนตามว่าหน่วยที่ใช้ใกล้เคียงกับที่บ้านนั้นเคยใช้แค่ไหน
    */
+  /**
+   * ผู้สมัครของเลขมิเตอร์หนึ่งค่า โดยไม่ต้องมีไฟล์รูป — ใช้โดยหน้าจับคู่ข้อมูลกำพร้า
+   *
+   * ═══ ทำไมต้องเปิดทางเข้าตรงนี้ ═══
+   *
+   * `analyze()` รับ multipart แล้ว OCR เอง ซึ่งเหมาะกับตอนอัปรูปทั้งชุด แต่ข้อมูล
+   * กำพร้าถูกอ่านและเก็บลงดิสก์ไปตั้งแต่รอบก่อนแล้ว การส่งไฟล์กลับเข้าไป OCR ใหม่
+   * เท่ากับจ่ายค่า GPU ซ้ำเพื่อผลลัพธ์เดิม
+   *
+   * ที่สำคัญกว่าคือ **ต้องเป็นเกณฑ์ชุดเดียวกัน** — ถ้าหน้าจับคู่เขียนสูตรของตัวเอง
+   * มันจะเสนอบ้านที่พอกดยืนยันจริงแล้วโดน BillsService ตีกลับเป็น 409
+   */
+  async candidatesForUnit(
+    meterUnit: number,
+    params: {
+      billing_month: string;
+      billing_year: string;
+      villages_id?: number | null;
+      latitude?: number | null;
+      longitude?: number | null;
+    },
+  ): Promise<Candidate[]> {
+    const members = await this.memberRepository.find({
+      where: params.villages_id ? { villages_id: params.villages_id } : {},
+      order: { house_no: 'ASC' },
+    });
+    if (members.length === 0) return [];
+
+    const memberIds = members.map((m) => m.id);
+    const baseline = await this.billsService.previousUnitsForMembers(
+      memberIds,
+      params.billing_month,
+      params.billing_year,
+    );
+    const learned = this.billsService.learnedMeterLocations(
+      await this.billsService.readingsOfMembers(memberIds),
+    );
+
+    // ประกอบ PhotoMetadata เทียม — ใช้เฉพาะพิกัดในการคิดระยะ ส่วน EXIF ไม่เกี่ยว
+    return this.rankCandidates(meterUnit, members, baseline, learned, {
+      has_exif: false,
+      captured_at: null,
+      latitude: params.latitude ?? null,
+      longitude: params.longitude ?? null,
+    });
+  }
+
   private rankCandidates(
     meterUnit: number,
     members: MemberEntity[],

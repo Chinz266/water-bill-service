@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { randomBytes } from 'crypto';
-import { mkdir, unlink, writeFile } from 'fs/promises';
+import { mkdir, readFile, unlink, writeFile } from 'fs/promises';
 import { join } from 'path';
 import sharp from 'sharp';
 
@@ -74,6 +74,38 @@ export class MeterPhotoService {
     await writeFile(join(this.dir, name), jpeg);
 
     return MeterPhotoService.URL_PREFIX + name;
+  }
+
+  /**
+   * อ่านไฟล์ที่เก็บไว้แล้วกลับมาเป็น data URL — null เมื่อไฟล์หายหรือ path ใช้ไม่ได้
+   *
+   * ═══ ใช้ตอนไหน ═══
+   *
+   * ตอนจับคู่ข้อมูลกำพร้า รูปถูกเขียนลงดิสก์ไปตั้งแต่รอบก่อนแล้ว แต่ทางออกบิล
+   * (`createFromScan`) รับรูปเป็น data URL เท่านั้น เพราะมันต้องผ่าน sharp เองเพื่อกัน
+   * ไฟล์ที่ไม่ใช่รูปจริงถูกวางไว้ในโฟลเดอร์ที่เสิร์ฟเป็น static
+   *
+   * ยอมจ่ายค่าอ่านไฟล์หนึ่งรอบ ดีกว่าเปิดทางให้ส่ง path เข้าไปตรง ๆ ซึ่งจะข้ามชั้นนั้น
+   * ไปทั้งชั้น (และเปิดช่องให้ path ที่มี ../ พาไปหยิบไฟล์อื่นในเครื่อง)
+   */
+  async toDataUrl(
+    storedPath: string | null | undefined,
+  ): Promise<string | null> {
+    if (!storedPath?.startsWith(MeterPhotoService.URL_PREFIX)) return null;
+
+    const name = storedPath.slice(MeterPhotoService.URL_PREFIX.length);
+    // กัน path traversal ด้วยกฎเดียวกับ remove() — ชื่อไฟล์ที่เราตั้งเองเท่านั้น
+    if (!/^[\w.-]+$/.test(name)) return null;
+
+    try {
+      const buffer = await readFile(join(this.dir, name));
+      return `data:image/jpeg;base64,${buffer.toString('base64')}`;
+    } catch (error) {
+      this.logger.warn(
+        `อ่านไฟล์รูป ${name} ไม่ได้: ${(error as Error).message}`,
+      );
+      return null;
+    }
   }
 
   /**

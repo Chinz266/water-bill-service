@@ -88,7 +88,7 @@ describe('PhotoMetadataService', () => {
     expect(service.read(Buffer.alloc(0)).has_exif).toBe(false);
   });
 
-  describe('distanceMeters (Haversine)', () => {
+  describe('distanceMeters (Equirectangular)', () => {
     const KORAT = { latitude: 14.9799, longitude: 102.0977 };
 
     it('จุดเดียวกัน = 0 เมตร', () => {

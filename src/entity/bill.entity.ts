@@ -34,8 +34,29 @@ export class BillEntity {
   @Column('int')
   usage_unit!: number; // หน่วยที่ใช้ไป (current - previous)
 
+  /**
+   * ค่าน้ำ **ของเดือนนี้เท่านั้น** = usage_unit × price_per_unit
+   *
+   * ⚠️ ห้ามเอายอดค้างเก่ามาบวกในนี้เด็ดขาด — usageBaseline(), outstandingByMember()
+   *    และรายงานรายได้ทั้งหมดอ่านคอลัมน์นี้ว่าเป็นค่าน้ำของรอบเดียว
+   *    เอายอดเก่ามาปนจะทำให้ยอดค้างถูกนับซ้ำทุกเดือนที่ทบต่อกันไป
+   *    ยอดที่ต้องจ่ายจริงบนใบเสร็จอยู่ที่ grand_total
+   */
   @Column('decimal', { precision: 10, scale: 2 })
-  total_amount!: number; // ยอดรวมที่ต้องชำระ
+  total_amount!: number;
+
+  /** ยอดค้างจากบิลเก่าที่ทบเข้ามาในใบนี้ — ภาพนิ่ง ณ วันออกบิล ไม่คิดสดตอนแสดงผล */
+  @Column('decimal', { precision: 10, scale: 2, default: 0 })
+  arrears_amount!: number;
+
+  /**
+   * ยอดที่ต้องจ่ายจริงบนใบนี้ = total_amount + arrears_amount
+   *
+   * เก็บเป็นภาพนิ่งเพราะใบที่พิมพ์ส่งให้ลูกบ้านไปแล้วต้องตรงกับที่ระบบบอกเสมอ
+   * ต่อให้มีคนไปจ่ายบิลเก่าทีหลังก็ตาม — NULL = บิลเก่าก่อน migration
+   */
+  @Column('decimal', { precision: 10, scale: 2, nullable: true })
+  grand_total!: number | null;
 
   @Column({ length: 10 })
   billing_month!: string; // ประจำเดือน (เช่น '06')
@@ -56,6 +77,19 @@ export class BillEntity {
    */
   @Column({ type: 'tinyint', unsigned: true, default: 1 })
   period_months!: number;
+
+  /** ผู้อยู่อาศัยที่บิลใบนี้เรียกเก็บจาก — NULL = เจ้าของอยู่เอง หรือบิลก่อนมีตาราง tenancies */
+  @Column({ type: 'int', nullable: true })
+  tenancy_id!: number | null;
+
+  /**
+   * 1 = บิลปิดยอดตอนย้ายออก ไม่ใช่บิลประจำเดือน
+   *
+   * ต่างจากบิลปกติตรงที่ due_date เป็นวันย้ายออกเลย ไม่ยืดตาม payment_due_days
+   * ของหมู่บ้าน (คนที่ย้ายออกไปแล้วตามเก็บทีหลังแทบไม่ได้)
+   */
+  @Column({ type: 'tinyint', default: 0 })
+  is_final!: number;
 
   // สมมติสถานะการจ่ายเงินมี 3 แบบ: รอจ่าย, จ่ายแล้ว, ค้างชำระ
   @Column({

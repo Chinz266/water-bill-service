@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
 import { Repository } from 'typeorm';
@@ -11,6 +12,10 @@ import { WaterRateEntity } from '../entity/water-rate.entity';
 import { MeterReadingEntity } from '../entity/meter-reading.entity';
 import { MemberEntity } from '../entity/member.entity';
 import { VillageEntity } from '../entity/village.entity';
+import { BillArrearsEntity } from '../entity/bill-arrears.entity';
+import { MeterEntity } from '../entity/meter.entity';
+import { ReadingFlagsService } from './reading-flags.service';
+import { ReadingLogsService } from './reading-logs.service';
 import { CreateBillFromScanDto } from '../dto/create-bill-from-scan.dto';
 
 /**
@@ -46,6 +51,11 @@ describe('BillsService — ด่านตรวจก่อนออกบิ�
   let memberRepository: { find: jest.Mock; findOne: jest.Mock };
   let villageRepository: { findOne: jest.Mock };
   let photoService: { remove: jest.Mock; save: jest.Mock };
+  let billArrearsRepository: { find: jest.Mock };
+  let meterRepository: { findOne: jest.Mock };
+  let readingFlagsService: { record: jest.Mock };
+  let readingLogsService: { record: jest.Mock };
+  let txManager: Record<string, jest.Mock>;
 
   beforeEach(() => {
     // คืน null เสมอ = "ไม่พบเรทค่าน้ำ" ใช้เป็นหมุดบอกว่าโค้ดวิ่งผ่านด่านตรวจมาถึงตรงนี้ได้
@@ -62,23 +72,27 @@ describe('BillsService — ด่านตรวจก่อนออกบิ�
       getRawAndEntities: jest.fn().mockResolvedValue({ entities: [], raw: [] }),
     };
 
+    // manager ปลอมตัวเดียวใช้ซ้ำทุกทรานแซกชัน — เก็บไว้ใน txManager ด้วย
+    // เพื่อให้เทสต์ตรวจได้ว่ามีการ update อะไรลงตารางไหนบ้าง
+    txManager = {
+      delete: jest.fn(),
+      update: jest.fn(),
+      count: jest.fn().mockResolvedValue(0),
+      find: jest.fn().mockResolvedValue([]),
+      create: jest.fn((_entity: unknown, value: unknown) => value),
+      save: jest.fn((value: Record<string, unknown>) =>
+        Promise.resolve({ id: 99, ...value }),
+      ),
+      findOne: jest.fn().mockResolvedValue(null),
+    };
+
     billRepository = {
       findOne: jest.fn(),
       createQueryBuilder: jest.fn(() => queryBuilder),
       manager: {
         // รันคอลแบ็กจริงด้วย manager ปลอม จะได้เห็นค่าที่คำนวณได้จริง ๆ ในบิลที่คืนออกมา
         transaction: jest.fn((cb: (m: Record<string, jest.Mock>) => unknown) =>
-          Promise.resolve(
-            cb({
-              delete: jest.fn(),
-              count: jest.fn().mockResolvedValue(0),
-              create: jest.fn((_entity: unknown, value: unknown) => value),
-              save: jest.fn((value: Record<string, unknown>) =>
-                Promise.resolve({ id: 99, ...value }),
-              ),
-              findOne: jest.fn().mockResolvedValue(null),
-            }),
-          ),
+          Promise.resolve(cb(txManager)),
         ),
       },
     };
@@ -98,6 +112,15 @@ describe('BillsService — ด่านตรวจก่อนออกบิ�
       save: jest.fn(),
     };
 
+    // ยอดค้าง: ไม่มีบิลเก่าค้างอยู่ในเทสต์ชุดนี้ การผูก bill_arrears จึงไม่ถูกเรียก
+    billArrearsRepository = { find: jest.fn().mockResolvedValue([]) };
+    // ทะเบียนมิเตอร์: ไม่มีตัวที่ถอดแล้วรอคิดหน่วยค้าง (คืน null = ไม่มี)
+    meterRepository = { findOne: jest.fn().mockResolvedValue(null) };
+    // ธง: เก็บไว้ตรวจว่าด่านที่กดผ่านทิ้งร่องรอยไว้จริง
+    readingFlagsService = { record: jest.fn().mockResolvedValue(undefined) };
+    // log การแก้เลขมิเตอร์: เก็บไว้ตรวจว่าการแก้ทิ้งร่องรอยไว้จริง
+    readingLogsService = { record: jest.fn().mockResolvedValue(undefined) };
+
     service = new BillsService(
       billRepository as unknown as Repository<BillEntity>,
       waterRateRepository as unknown as Repository<WaterRateEntity>,
@@ -105,6 +128,10 @@ describe('BillsService — ด่านตรวจก่อนออกบิ�
       memberRepository as unknown as Repository<MemberEntity>,
       villageRepository as unknown as Repository<VillageEntity>,
       photoService as unknown as MeterPhotoService,
+      billArrearsRepository as unknown as Repository<BillArrearsEntity>,
+      meterRepository as unknown as Repository<MeterEntity>,
+      readingFlagsService as unknown as ReadingFlagsService,
+      readingLogsService as unknown as ReadingLogsService,
     );
   });
 
@@ -124,15 +151,28 @@ describe('BillsService — ด่านตรวจก่อนออกบิ�
     ]);
   };
 
-  /** dto ตั้งต้นที่ถูกต้องทุกอย่าง แล้วค่อยแก้เฉพาะ field ที่อยากทดสอบ */
+  /**
+   * dto ตั้งต้นที่ถูกต้องทุกอย่าง แล้วค่อยแก้เฉพาะ field ที่อยากทดสอบ
+   *
+   * ต้องระบุ entry_method: 'ocr' เพราะกฎ "กรอกมือต้องแนบรูปเสมอ" บล็อกการจด
+   * ที่ไม่ได้ผ่าน OCR และไม่มีรูป — ซึ่งไม่ใช่สิ่งที่เทสต์ชุดนี้กำลังทดสอบ
+   * (เคสของกฎนั้นอยู่ใน describe 'วิธีกรอกเลขมิเตอร์' ของไฟล์นี้เอง)
+   */
   const dto = (overrides: Partial<CreateBillFromScanDto> = {}) => ({
     members_id: 1,
     water_rates_id: 1,
     current_unit: 1250,
     billing_month: CURRENT_MONTH,
     billing_year: CURRENT_YEAR,
+    entry_method: 'ocr',
     ...overrides,
   });
+
+  /** ธงที่ถูกส่งเข้า ReadingFlagsService.record() ในการเรียกครั้งแรก */
+  const recordedFlags = (): { flag_type: string }[] => {
+    const calls = readingFlagsService.record.mock.calls as unknown[][];
+    return (calls[0]?.[2] ?? []) as { flag_type: string }[];
+  };
 
   describe('เดือน/ปีของบิล', () => {
     it.each(['13', '0', 'ส.ค.', ''])(
@@ -650,6 +690,452 @@ describe('BillsService — ด่านตรวจก่อนออกบิ�
       const bill = await service.createFromScan(dto({ current_unit: 1300 }));
 
       expect(bill.period_months).toBe(1);
+    });
+  });
+
+  describe('วิธีกรอกเลขมิเตอร์ (กรอกมือต้องมีรูป)', () => {
+    it('กรอกมือแล้วไม่แนบรูป → บล็อกตาย ไม่มีปุ่มยืนยัน', async () => {
+      givenBaseline(1250);
+
+      await expect(
+        service.createFromScan(
+          dto({ current_unit: 1300, entry_method: 'manual' }),
+        ),
+      ).rejects.toThrow(/ต้องแนบรูปหน้าปัด/);
+    });
+
+    it('กรอกมือพร้อมรูป → ผ่าน และบันทึกว่าเป็นการกรอกมือ', async () => {
+      givenBaseline(1250);
+      photoService.save.mockResolvedValue('/uploads/meters/x.jpg');
+
+      await expect(
+        service.createFromScan(
+          dto({
+            current_unit: 1300,
+            entry_method: 'manual',
+            meter_photo: 'data:image/jpeg;base64,AAAA',
+          }),
+        ),
+      ).resolves.toBeDefined();
+
+      // ต้องเหลือร่องรอยไว้ว่าเลขนี้ไม่ได้ผ่าน OCR
+      const flags = recordedFlags();
+      expect(flags.some((f) => f.flag_type === 'manual_entry')).toBe(true);
+    });
+
+    it('ไม่ประกาศ entry_method แต่มีผล OCR ติดมา → ถือว่าเป็น ocr (หน้าเว็บรุ่นเก่าไม่พัง)', async () => {
+      givenBaseline(1250);
+
+      const bill = await service.createFromScan({
+        members_id: 1,
+        water_rates_id: 1,
+        current_unit: 1300,
+        billing_month: CURRENT_MONTH,
+        billing_year: CURRENT_YEAR,
+        read_confidence: 0.97,
+      });
+
+      expect(bill).toBeDefined();
+    });
+  });
+
+  describe('เวลาที่ถ่ายรูป', () => {
+    it('เวลาถ่ายเป็นอนาคต → บล็อกตาย (นาฬิกาเครื่องเพี้ยน)', async () => {
+      givenBaseline(1250);
+
+      const future = new Date();
+      future.setHours(future.getHours() + 3);
+
+      await expect(
+        service.createFromScan(
+          dto({ current_unit: 1300, captured_at: future.toISOString() }),
+        ),
+      ).rejects.toThrow(/เวลาในอนาคต/);
+    });
+
+    it('คลาดไปข้างหน้าไม่กี่นาที → ผ่าน (นาฬิกามือถือกับ server ไม่ตรงกันเป็นปกติ)', async () => {
+      givenBaseline(1250);
+
+      const slightlyAhead = new Date(Date.now() + 60_000);
+
+      await expect(
+        service.createFromScan(
+          dto({
+            current_unit: 1300,
+            captured_at: slightlyAhead.toISOString(),
+            reading_date: toIso(TODAY),
+          }),
+        ),
+      ).resolves.toBeDefined();
+    });
+
+    it('ถ่ายค้างไว้เกิน 24 ชม. → ผ่านแต่ติดธงไว้', async () => {
+      givenBaseline(1250);
+
+      const yesterday = new Date(Date.now() - 30 * 3_600_000);
+
+      await service.createFromScan(
+        dto({
+          current_unit: 1300,
+          captured_at: yesterday.toISOString(),
+          reading_date: toIso(TODAY),
+        }),
+      );
+
+      const flags = recordedFlags();
+      expect(flags.some((f) => f.flag_type === 'stale_photo')).toBe(true);
+    });
+  });
+
+  describe('ยอดค้างที่ทบเข้าบิลใบใหม่', () => {
+    /** บิลเก่าที่ยังไม่จ่ายของบ้านหลังนี้ */
+    const givenUnpaidBills = (bills: Record<string, unknown>[]) => {
+      const builder = billRepository.createQueryBuilder() as {
+        getMany: jest.Mock;
+      };
+      builder.getMany.mockResolvedValue(bills);
+    };
+
+    it('ไม่มีบิลค้าง → arrears เป็น 0 และ grand_total เท่ากับค่าน้ำเดือนนี้', async () => {
+      givenBaseline(1250);
+
+      const bill = await service.createFromScan(dto({ current_unit: 1300 }));
+
+      expect(Number(bill.arrears_amount)).toBe(0);
+      expect(Number(bill.grand_total)).toBe(Number(bill.total_amount));
+    });
+
+    it('มีบิลค้าง 2 ใบ → ทบเข้า grand_total แต่ total_amount ยังเป็นค่าน้ำเดือนนี้ล้วน', async () => {
+      givenBaseline(1250);
+      // เดือนก่อนหน้าทั้งคู่ ไม่งั้นจะไปชนด่าน "มีบิลใหม่กว่าอยู่"
+      givenUnpaidBills([
+        {
+          id: 11,
+          billing_month: '01',
+          billing_year: '2000',
+          current_unit: 1000,
+          usage_unit: 10,
+          total_amount: '150.00',
+          payment_status: 'Pending',
+        },
+        {
+          id: 12,
+          billing_month: '02',
+          billing_year: '2000',
+          current_unit: 1010,
+          usage_unit: 10,
+          total_amount: '200.00',
+          payment_status: 'Overdue',
+        },
+      ]);
+
+      const bill = await service.createFromScan(dto({ current_unit: 1300 }));
+
+      // เลขตั้งต้นมาจากบิลใบล่าสุด (1010) ไม่ใช่การจดตอนลงทะเบียน
+      expect(Number(bill.usage_unit)).toBe(290);
+      expect(Number(bill.total_amount)).toBe(290 * 15);
+      expect(Number(bill.arrears_amount)).toBe(350);
+      expect(Number(bill.grand_total)).toBe(290 * 15 + 350);
+    });
+
+    it('บิลที่จ่ายแล้วไม่ถูกทบซ้ำ', async () => {
+      givenBaseline(1250);
+      givenUnpaidBills([
+        {
+          id: 11,
+          billing_month: '01',
+          billing_year: '2000',
+          current_unit: 1000,
+          usage_unit: 10,
+          total_amount: '150.00',
+          payment_status: 'Paid',
+        },
+      ]);
+
+      const bill = await service.createFromScan(dto({ current_unit: 1300 }));
+
+      expect(Number(bill.arrears_amount)).toBe(0);
+    });
+  });
+
+  describe('รับชำระเงิน', () => {
+    it('ปิดใบเก่าที่ถูกทบยอดไปพร้อมกัน ไม่ใช่ปิดแค่ใบเดียว', async () => {
+      billRepository.findOne.mockResolvedValue({
+        id: 5,
+        payment_status: 'Pending',
+        total_amount: '300.00',
+        grand_total: '650.00',
+      });
+      billArrearsRepository.find.mockResolvedValue([
+        { bill_id: 5, covered_bill_id: 3 },
+        { bill_id: 5, covered_bill_id: 4 },
+      ]);
+
+      const result = await service.payBill(5, 1);
+
+      expect(result.settled_bill_ids).toEqual([3, 4]);
+      expect(result.paid_amount).toBe(650);
+    });
+
+    it('บิลที่จ่ายแล้ว กดรับเงินซ้ำไม่ได้', async () => {
+      billRepository.findOne.mockResolvedValue({
+        id: 5,
+        payment_status: 'Paid',
+        total_amount: '300.00',
+      });
+
+      await expect(service.payBill(5)).rejects.toThrow(ConflictException);
+    });
+  });
+
+  describe('แก้เลขมิเตอร์ของบิลที่ออกไปแล้ว', () => {
+    const OWNER = { id: 1, admin_role: 'owner' as const };
+    const STAFF = { id: 2, admin_role: 'staff' as const };
+
+    /** ค่าตั้งต้นที่ถูกต้องของ input แล้วค่อยแก้เฉพาะที่อยากทดสอบ */
+    const edit = (overrides: Record<string, unknown> = {}) => ({
+      current_unit: '1310',
+      reason: 'OCR อ่านหลักสุดท้ายผิด เทียบกับรูปแล้วเป็น 1310',
+      ...overrides,
+    });
+
+    /**
+     * บิลที่ออกไปแล้วหนึ่งใบ พร้อมการจดที่ผูกอยู่
+     *
+     * เลขตั้งต้น 1250 มาจากการจดตอนลงทะเบียน (ไม่มีบิลเดือนก่อนในเทสต์ชุดนี้)
+     * วันที่จดตั้งเป็นปี 2000 = "ไม่ใช่วันนี้" แน่นอนโดยไม่ต้องฮาร์ดโค้ดวันจริง
+     */
+    const givenBill = (
+      bill: Record<string, unknown> = {},
+      reading: Record<string, unknown> = {},
+    ) => {
+      waterRateRepository.findOne.mockResolvedValue({
+        id: 1,
+        price_per_unit: '15.00',
+      });
+      billRepository.findOne.mockResolvedValue({
+        id: 5,
+        meter_readings_id: 50,
+        water_rates_id: 1,
+        billing_month: CURRENT_MONTH,
+        billing_year: CURRENT_YEAR,
+        previous_unit: 1250,
+        current_unit: 1300,
+        usage_unit: 50,
+        total_amount: '750.00',
+        arrears_amount: '0.00',
+        grand_total: '750.00',
+        period_months: 1,
+        payment_status: 'Pending',
+        ...bill,
+      });
+      meterReadingRepository.findOne.mockResolvedValue({
+        id: 50,
+        members_id: 1,
+        meter_unit: 1300,
+        reading_date: '2000-01-15',
+        evidence_photo: null,
+        ...reading,
+      });
+      meterReadingRepository.find.mockResolvedValue([
+        { id: 49, meter_unit: 1250 },
+      ]);
+    };
+
+    /** รหัสด่านที่แนบมากับ error (undefined = error ธรรมดา ไม่มีปุ่มยืนยัน) */
+    const codeOf = async (promise: Promise<unknown>) => {
+      try {
+        await promise;
+        return null;
+      } catch (error) {
+        const body = (error as BadRequestException).getResponse() as {
+          code?: string;
+        };
+        return body?.code;
+      }
+    };
+
+    it('บิลที่จ่ายแล้วแก้ไม่ได้ แม้จะเป็น owner', async () => {
+      givenBill({ payment_status: 'Paid' });
+
+      await expect(service.updateReading(5, edit(), OWNER)).rejects.toThrow(
+        ConflictException,
+      );
+    });
+
+    it('ไม่กรอกเหตุผล = ไม่แก้ให้', async () => {
+      givenBill();
+
+      await expect(
+        service.updateReading(5, edit({ reason: '   ' }), OWNER),
+      ).rejects.toThrow(BadRequestException);
+      expect(readingLogsService.record).not.toHaveBeenCalled();
+    });
+
+    it('staff แก้บิลที่เลยกำหนดและไม่ได้จดวันนี้ไม่ได้', async () => {
+      givenBill({ payment_status: 'Overdue' });
+
+      await expect(service.updateReading(5, edit(), STAFF)).rejects.toThrow(
+        ForbiddenException,
+      );
+    });
+
+    it('staff แก้บิลที่ยังรอชำระได้', async () => {
+      givenBill({ payment_status: 'Pending' });
+
+      const result = await service.updateReading(5, edit(), STAFF);
+
+      expect(result.usage_unit).toBe(60);
+      expect(result.total_amount).toBe(900);
+    });
+
+    it('staff แก้บิลที่เลยกำหนดได้ ถ้าเป็นการจดของวันนี้', async () => {
+      givenBill({ payment_status: 'Overdue' }, { reading_date: toIso(TODAY) });
+
+      const result = await service.updateReading(5, edit(), STAFF);
+
+      expect(result.usage_unit).toBe(60);
+    });
+
+    it('owner แก้บิลที่เลยกำหนดได้ตลอด', async () => {
+      givenBill({ payment_status: 'Overdue' });
+
+      const result = await service.updateReading(5, edit(), OWNER);
+
+      expect(result.total_amount).toBe(900);
+    });
+
+    it('เลขใหม่ต่ำกว่าเลขตั้งต้น → 400 พร้อม code meter_reset', async () => {
+      givenBill();
+
+      expect(
+        await codeOf(
+          service.updateReading(5, edit({ current_unit: '20' }), OWNER),
+        ),
+      ).toBe('meter_reset');
+    });
+
+    it('กดยืนยันเปลี่ยนมิเตอร์แล้ว เริ่มนับจาก 0', async () => {
+      givenBill();
+
+      const result = await service.updateReading(
+        5,
+        edit({ current_unit: '20', confirm_meter_reset: 'true' }),
+        OWNER,
+      );
+
+      expect(result.usage_unit).toBe(20);
+    });
+
+    it('หน่วยพุ่งเกินเพดาน → 400 พร้อม code high_usage', async () => {
+      givenBill();
+
+      expect(
+        await codeOf(
+          service.updateReading(5, edit({ current_unit: '9250' }), OWNER),
+        ),
+      ).toBe('high_usage');
+    });
+
+    it('กดยืนยันหน่วยพุ่งแล้วแก้ได้', async () => {
+      givenBill();
+
+      const result = await service.updateReading(
+        5,
+        edit({ current_unit: '9250', confirm_high_usage: 'true' }),
+        OWNER,
+      );
+
+      expect(result.usage_unit).toBe(8000);
+    });
+
+    it('บันทึกร่องรอยว่าใครแก้จากเท่าไหร่เป็นเท่าไหร่ ด้วยเหตุผลอะไร', async () => {
+      givenBill();
+
+      await service.updateReading(5, edit(), STAFF);
+
+      expect(readingLogsService.record).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          bills_id: 5,
+          old_unit: 1300,
+          new_unit: 1310,
+          old_usage_unit: 50,
+          new_usage_unit: 60,
+          old_total_amount: 750,
+          new_total_amount: 900,
+          reason: edit().reason,
+          changed_by: 2,
+          changed_role: 'staff',
+        }),
+      );
+    });
+
+    it('ใบที่ทบยอดใบนี้ไว้ ถูกคิดยอดค้างใหม่ตามไปด้วย', async () => {
+      givenBill();
+      // ใบที่ 9 ทบยอดใบที่ 5 ไว้ 750 บาท (ยอดก่อนแก้)
+      const link = { id: 7, bill_id: 9, covered_bill_id: 5, amount: '750.00' };
+      txManager.find.mockImplementation(
+        (_entity: unknown, options: { where?: Record<string, number> }) =>
+          Promise.resolve(options?.where?.covered_bill_id ? [link] : [link]),
+      );
+      txManager.findOne.mockResolvedValue({
+        id: 9,
+        total_amount: '300.00',
+        payment_status: 'Pending',
+      });
+
+      await service.updateReading(5, edit(), OWNER);
+
+      expect(txManager.update).toHaveBeenCalledWith(BillArrearsEntity, 7, {
+        amount: 900,
+      });
+      expect(txManager.update).toHaveBeenCalledWith(BillEntity, 9, {
+        arrears_amount: 900,
+        grand_total: 1200,
+      });
+    });
+
+    it('ใบที่จ่ายเงินไปแล้วไม่ถูกเขียนทับ', async () => {
+      givenBill();
+      const link = { id: 7, bill_id: 9, covered_bill_id: 5, amount: '750.00' };
+      txManager.find.mockResolvedValue([link]);
+      txManager.findOne.mockResolvedValue({
+        id: 9,
+        total_amount: '300.00',
+        payment_status: 'Paid',
+      });
+
+      await service.updateReading(5, edit(), OWNER);
+
+      expect(txManager.update).not.toHaveBeenCalledWith(
+        BillArrearsEntity,
+        7,
+        expect.anything(),
+      );
+    });
+
+    it('แนบรูปใหม่ = ลบไฟล์รูปเดิมทิ้งหลังบันทึกสำเร็จ', async () => {
+      givenBill({}, { evidence_photo: '/uploads/meters/old.jpg' });
+      photoService.save.mockResolvedValue('/uploads/meters/new.jpg');
+
+      await service.updateReading(
+        5,
+        edit({ photo: 'data:image/jpeg;base64,AAAA' }),
+        OWNER,
+      );
+
+      expect(photoService.remove).toHaveBeenCalledWith(
+        '/uploads/meters/old.jpg',
+      );
+    });
+
+    it('ไม่แนบรูปใหม่ = ไม่ไปแตะไฟล์รูปเดิม', async () => {
+      givenBill({}, { evidence_photo: '/uploads/meters/old.jpg' });
+
+      await service.updateReading(5, edit(), OWNER);
+
+      expect(photoService.remove).not.toHaveBeenCalled();
     });
   });
 });
