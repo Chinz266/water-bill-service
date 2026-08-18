@@ -48,7 +48,11 @@ describe('BillsService — ด่านตรวจก่อนออกบิ�
     manager: { transaction: jest.Mock };
   };
   let meterReadingRepository: { find: jest.Mock; findOne: jest.Mock };
-  let memberRepository: { find: jest.Mock; findOne: jest.Mock };
+  let memberRepository: {
+    find: jest.Mock;
+    findOne: jest.Mock;
+    findOneBy: jest.Mock;
+  };
   let villageRepository: { findOne: jest.Mock };
   let photoService: { remove: jest.Mock; save: jest.Mock };
   let billArrearsRepository: { find: jest.Mock };
@@ -105,6 +109,12 @@ describe('BillsService — ด่านตรวจก่อนออกบิ�
     memberRepository = {
       find: jest.fn().mockResolvedValue([]),
       findOne: jest.fn().mockResolvedValue({ id: 1, villages_id: null }),
+      // บ้านเดี่ยว (ไม่มี cluster_group_id) = ด่านที่ใช้ระยะทางทำงานตามเดิมทุกข้อ
+      findOneBy: jest.fn().mockResolvedValue({
+        id: 1,
+        villages_id: null,
+        cluster_group_id: null,
+      }),
     };
     villageRepository = { findOne: jest.fn().mockResolvedValue(null) };
     photoService = {

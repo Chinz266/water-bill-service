@@ -109,6 +109,11 @@ export const BILL_ERROR_CODES = {
   BILL_PAID: 'BILL_PAID',
   /** มีบิลเดือนที่ใหม่กว่าอยู่ — ต้องลบใบนั้นก่อน */
   LATER_BILL_EXISTS: 'LATER_BILL_EXISTS',
+  /**
+   * เลขที่จดเข้ากับบ้านอีกหลังในกลุ่มมิเตอร์เดียวกันมากกว่า — จดสลับตัวซ้าย/ตัวขวา
+   * ไม่มีปุ่มยืนยัน เพราะทางแก้คือ "เลือกบ้านให้ถูกหลัง" ไม่ใช่ปล่อยเลขผิดผ่านไป
+   */
+  CLUSTER_SEQUENCE_MISMATCH: 'CLUSTER_SEQUENCE_MISMATCH',
 } as const;
 
 export type BillErrorCode =
@@ -1166,6 +1171,114 @@ export class BillsService {
   /** ถ่ายไว้เกินกี่ชั่วโมงก่อนส่งเข้าระบบจึงติดธงเตือน (ไม่บล็อก) */
   static readonly PHOTO_AGE_WARN_HOURS = 24;
 
+  // ==========================================
+  // กลุ่มมิเตอร์ที่ติดกันจน GPS แยกไม่ออก
+  // ==========================================
+
+  /**
+   * บ้านทุกหลังในกลุ่มมิเตอร์เดียวกัน (รวมตัวเอง) — ว่างเมื่อบ้านหลังนี้ไม่ได้อยู่ในกลุ่มไหน
+   *
+   * ═══ ทำไมต้องมี ═══
+   *
+   * มิเตอร์ทาวน์โฮมเรียงติดกันบนกำแพงเดียวกัน ห่างกันราว 30 ซม. ส่วน GPS มือถือ
+   * คลาดเคลื่อน 3-5 ม. ในที่โล่งและ 10-30 ม. ใต้ชายคา — ความคลาดเคลื่อนกว้างกว่า
+   * ระยะจริงเป็นสิบเท่า ทุกด่านที่ตัดสินจาก "ระยะทาง" จึงให้คำตอบมั่วสำหรับกลุ่มนี้:
+   * เดินไปอีกหนึ่งตัวแล้วถ่าย ระบบเห็นว่า "ยืนอยู่ที่เดิม" ทุกครั้ง
+   *
+   * บ้านในกลุ่มเดียวกันจึงต้อง **ข้ามด่านที่ใช้ระยะทาง** แล้วไปตรวจด้วยตัวเลขแทน
+   * (current_unit เทียบ previous_unit — ดู assertClusterReadingFits) ส่วนตำแหน่ง
+   * ซ้าย/ขวาเป็นหน้าที่ของ sequence_index ซึ่งเป็นค่าตายตัวที่ไม่แกว่งตามสัญญาณ
+   */
+  private async clusterMemberIds(membersId: number): Promise<Set<number>> {
+    const member = await this.memberRepository.findOneBy({ id: membersId });
+    const cluster = member?.cluster_group_id ?? null;
+    if (!cluster) return new Set<number>();
+
+    const mates = await this.memberRepository.find({
+      where: { cluster_group_id: cluster },
+    });
+    return new Set(mates.map((m) => m.id));
+  }
+
+  /** ป้ายบอกตำแหน่งที่คนอ่านแล้วเห็นภาพ — ซ้ายสุด / ตรงกลาง / ขวาสุด */
+  static positionLabel(
+    sequence_index: number | null | undefined,
+    total: number,
+  ): string {
+    if (!sequence_index) return 'ยังไม่ได้ระบุตำแหน่ง';
+    if (sequence_index === 1) return 'ซ้ายสุด';
+    if (sequence_index === total) return 'ขวาสุด';
+    return total === 3 ? 'ตรงกลาง' : `ตัวที่ ${sequence_index} จากซ้าย`;
+  }
+
+  /**
+   * เลขที่จดเข้ากับบ้านหลังนี้จริงไหม เมื่อมิเตอร์อยู่ในกลุ่มที่ติดกัน
+   *
+   * ด่านนี้มาแทนสิ่งที่ GPS เคยถูกคาดหวังให้ทำ (แต่ทำไม่ได้): บอกว่าจดสลับตัวซ้าย/ตัวขวา
+   * เกณฑ์เป็นตัวเลขล้วน ๆ — มิเตอร์เดินหน้าอย่างเดียว เลขที่จดจึงต้องไม่ต่ำกว่า
+   * เลขตั้งต้นของบ้านหลังนั้น ถ้าต่ำกว่าของหลังที่เลือกแต่ไปเข้าของเพื่อนบ้านในกลุ่มพอดี
+   * นั่นคือหลักฐานตรง ๆ ว่าหยิบผิดตัว ไม่ใช่ "มิเตอร์เดินถอยหลัง"
+   *
+   * เงียบไว้เมื่อ:
+   *   - บ้านหลังนี้ไม่ได้อยู่ในกลุ่ม (บ้านเดี่ยว — ด่าน METER_ROLLBACK เดิมทำงานตามปกติ)
+   *   - เลขไม่ได้ต่ำกว่าเลขตั้งต้น (ไม่มีอะไรผิดให้อธิบาย)
+   *   - มีหลายหลังในกลุ่มที่เข้าได้ (ชี้ไม่ขาด บอกไปก็เดาให้เขาเปล่า ๆ)
+   */
+  private async assertClusterReadingFits(params: {
+    membersId: number;
+    current_unit: number;
+    previous_unit: number;
+    billing_month: string;
+    billing_year: string;
+  }): Promise<void> {
+    if (params.current_unit >= params.previous_unit) return;
+
+    const member = await this.memberRepository.findOneBy({
+      id: params.membersId,
+    });
+    if (!member?.cluster_group_id) return;
+
+    const mates = await this.memberRepository.find({
+      where: { cluster_group_id: member.cluster_group_id },
+      order: { sequence_index: 'ASC', id: 'ASC' },
+    });
+
+    const fits: { house_no: string; label: string; previous_unit: number }[] =
+      [];
+    for (const mate of mates) {
+      if (mate.id === member.id) continue;
+
+      const baseline = await this.getPreviousUnit(
+        mate.id,
+        params.billing_month,
+        params.billing_year,
+      );
+      // เข้าได้ = เลขนี้ไม่ต่ำกว่าเลขตั้งต้นของหลังนั้น (มิเตอร์เดินหน้าอย่างเดียว)
+      if (params.current_unit >= baseline.previous_unit) {
+        fits.push({
+          house_no: mate.house_no,
+          label: BillsService.positionLabel(mate.sequence_index, mates.length),
+          previous_unit: baseline.previous_unit,
+        });
+      }
+    }
+
+    if (fits.length !== 1) return;
+
+    const [fit] = fits;
+    const here = BillsService.positionLabel(
+      member.sequence_index,
+      mates.length,
+    );
+    throw new ConflictException(
+      billError(
+        BILL_ERROR_CODES.CLUSTER_SEQUENCE_MISMATCH,
+        `เลขที่จด (${params.current_unit.toLocaleString('th-TH')}) ต่ำกว่าเลขตั้งต้นของบ้าน ${member.house_no} (ตำแหน่ง: ${here}) ซึ่งอยู่ที่ ${params.previous_unit.toLocaleString('th-TH')} แต่เข้ากับบ้าน ${fit.house_no} (ตำแหน่ง: ${fit.label}, เลขตั้งต้น ${fit.previous_unit.toLocaleString('th-TH')}) ในกลุ่มมิเตอร์เดียวกันพอดี — น่าจะจดสลับตัวกัน กรุณาเลือกบ้านให้ตรงกับตำแหน่งของมิเตอร์ที่ถ่ายมาครับ`,
+        409,
+      ),
+    );
+  }
+
   /**
    * กันรูปเก่า/รูปใช้ซ้ำ — ตรวจสองชั้นจากข้อมูลที่มีอยู่แล้วในตาราง
    *
@@ -1228,9 +1341,20 @@ export class BillsService {
         where: { captured_at: Between(from, to) },
       });
 
+      // มิเตอร์ที่ติดกันบนกำแพงเดียวกัน: เดินไปอีกตัวแล้วถ่ายจริง ๆ ก็ยังขยับ 30 ซม.
+      // ซึ่งต่ำกว่า BURST_MOVE_M (5 ม.) เสมอ ด่านนี้จึงฟ้อง "ยืนที่เดิมกดชัตเตอร์รัว"
+      // ทุกครั้งที่ทำถูกต้อง — ต้องข้ามให้ทั้งกลุ่ม แล้วปล่อยให้ตัวเลขเป็นตัวตัดสินแทน
+      const clusterMates = await this.clusterMemberIds(params.membersId);
+
       for (const shot of nearby) {
         if (shot.id === params.excludeReadingId) continue;
         if (!shot.captured_at) continue;
+        if (
+          shot.members_id !== params.membersId &&
+          clusterMates.has(shot.members_id)
+        ) {
+          continue;
+        }
 
         // ต้องเช็คด้วย isFinite ไม่ใช่ `=== null` — คอลัมน์ decimal ที่ไม่ได้ select
         // มาจะเป็น undefined ซึ่งลอดการเทียบกับ null ไปได้ แล้ว Number(undefined)
@@ -1278,8 +1402,17 @@ export class BillsService {
       return;
     }
 
+    // GPS มือถือให้ค่าเดิมเป๊ะสองครั้งได้จริง เมื่อมิเตอร์สองตัวห่างกัน 30 ซม.
+    // (ต่ำกว่าความละเอียดที่เครื่องแยกออกหลายเท่า) — ในกลุ่มเดียวกันจึงไม่ใช่สัญญาณ
+    // ของการคัดลอกพิกัดอีกต่อไป ต้องมองข้ามเฉพาะคู่ที่อยู่กลุ่มเดียวกันเท่านั้น
+    // ส่วนพิกัดที่ไปซ้ำกับบ้านนอกกลุ่มยังเป็นเรื่องผิดปกติเหมือนเดิม
+    const mates = [...(await this.clusterMemberIds(params.membersId))].filter(
+      (id) => id !== params.membersId,
+    );
     const samePlace = await this.meterReadingRepository.findOne({
-      where: { latitude, longitude },
+      where: mates.length
+        ? { latitude, longitude, members_id: Not(In(mates)) }
+        : { latitude, longitude },
     });
     if (samePlace && samePlace.id !== params.excludeReadingId) {
       const owner =
@@ -1494,6 +1627,22 @@ export class BillsService {
       },
       order: { removed_at: 'DESC', id: 'DESC' },
     });
+
+    // มิเตอร์ในกลุ่มที่ติดกัน: ตรวจด้วยตัวเลขว่าหยิบถูกตัวไหม — ต้องมาก่อน resolveUsage
+    // ซึ่งจะโยน METER_ROLLBACK ("เพิ่งเปลี่ยนมิเตอร์ใช่ไหม") ออกไปก่อน ทั้งที่เคสจริง
+    // ของกลุ่มนี้คือจดสลับตัวซ้าย/ตัวขวา ซึ่งมีทางแก้คนละทางกันเลย
+    //
+    // ทะเบียนมิเตอร์บอกว่าเพิ่งถอดตัวเก่า หรือคนยืนยันการเปลี่ยนมิเตอร์มาแล้ว = อีกเรื่อง
+    // ปล่อยให้เป็นหน้าที่ของ resolveUsage ตามเดิม
+    if (!params.confirm_meter_reset && !pendingMeter) {
+      await this.assertClusterReadingFits({
+        membersId: params.membersId,
+        current_unit: params.current_unit,
+        previous_unit: baseline.previous_unit,
+        billing_month,
+        billing_year,
+      });
+    }
 
     const { previous_unit, usage_unit, meter_reset } = this.resolveUsage({
       current_unit: params.current_unit,

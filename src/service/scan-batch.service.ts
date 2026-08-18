@@ -40,6 +40,13 @@ export interface Candidate {
    * null = ยังมีประวัติไม่พอ (< 3 ครั้ง) ให้ใช้รัศมีค่ากลางแทน
    */
   spread_m: number | null;
+  /**
+   * กลุ่มมิเตอร์ที่ติดกันจน GPS แยกไม่ออก — null = บ้านเดี่ยว
+   * หน้าเว็บใช้ค่านี้ตัดสินว่าจะล็อกลำดับการจดหรือไม่ (ห้ามเดาบ้านจากพิกัดในกลุ่มนี้)
+   */
+  cluster_group_id: string | null;
+  /** ตำแหน่งในกลุ่ม เรียงซ้าย→ขวา (1 = ซ้ายสุด) — null เมื่อไม่ได้อยู่ในกลุ่ม */
+  sequence_index: number | null;
 }
 
 /** ผลการวิเคราะห์รูปหนึ่งใบ */
@@ -104,6 +111,39 @@ export class ScanBatchService {
 
   /** อัปเกินนี้ต่อครั้งไม่ให้ทำ — OCR ทีละใบ ยิ่งเยอะยิ่งกิน RAM และรอนาน */
   static readonly MAX_FILES = 30;
+
+  /**
+   * ═══ มิเตอร์ที่ติดกันบนกำแพงเดียวกัน (cluster) ═══
+   *
+   * ห่างกันราว 30 ซม. ส่วน GPS มือถือคลาดเคลื่อน 3-5 ม. ในที่โล่ง และ 10-30 ม.
+   * ใต้ชายคา/ระหว่างตึก — เล็กที่สุดที่พิกัดแยกได้ยังกว้างกว่าระยะจริงเป็นสิบเท่า
+   * ทุกด่านที่ตัดสินจากระยะทางจึงถูกปิดสำหรับบ้านในกลุ่มเดียวกัน (ดู sameCluster)
+   * แล้วใช้ลำดับตำแหน่งที่จดไว้ล่วงหน้า (sequence_index) เป็นตัวชี้ขาดแทน
+   */
+  private static sameCluster(
+    a: { cluster_group_id: string | null },
+    b: { cluster_group_id: string | null },
+  ): boolean {
+    return (
+      Boolean(a.cluster_group_id) && a.cluster_group_id === b.cluster_group_id
+    );
+  }
+
+  /**
+   * กลุ่มมิเตอร์ที่รูปใบนี้ "อาจเป็นของ" — ใช้ตัดสินว่าจะเงียบด่านที่พึ่งระยะทางไหม
+   *
+   * ใบที่ระบบชี้บ้านได้แล้วดูจากบ้านหลังนั้นหลังเดียว ส่วนใบที่ยังชี้ไม่ขาด (ซึ่งเป็น
+   * สภาพปกติของกลุ่มนี้ เพราะเลขมิเตอร์ของหลังที่ติดกันมักใกล้กัน) ต้องดูจากตัวเลือก
+   * ทั้งหมด ไม่งั้นด่านถ่ายรัวจะยังฟ้องทุกใบ ทั้งที่เหตุผลที่ยกเว้นให้ยังเป็นเหตุผลเดิม
+   */
+  private static clusterIdsOf(item: ScanBatchItem): Set<string> {
+    const source = item.suggestion ? [item.suggestion] : item.candidates;
+    return new Set(
+      source
+        .map((candidate) => candidate.cluster_group_id)
+        .filter((id): id is string => Boolean(id)),
+    );
+  }
 
   /**
    * ระยะที่ถือว่า "ถ่ายอยู่ที่บ้านหลังนี้จริง"
@@ -349,6 +389,18 @@ export class ScanBatchService {
           a.photo_taken.longitude === null ||
           b.photo_taken.latitude === null ||
           b.photo_taken.longitude === null
+        ) {
+          continue;
+        }
+
+        // มิเตอร์ที่ติดกันบนกำแพงเดียวกัน: เดินไปถ่ายตัวถัดไปจริง ๆ ก็ขยับแค่ 30 ซม.
+        // และใช้เวลาไม่กี่วินาที — เข้าเกณฑ์ "ยืนที่เดิมกดชัตเตอร์รัว" ทุกครั้งที่ทำถูก
+        // ต้องเงียบสำหรับกลุ่มนี้ ไม่งั้นคำเตือนจะขึ้นทุกใบจนไม่มีใครอ่านอีกเลย
+        const clustersOfA = ScanBatchService.clusterIdsOf(a);
+        if (
+          [...ScanBatchService.clusterIdsOf(b)].some((id) =>
+            clustersOfA.has(id),
+          )
         ) {
           continue;
         }
@@ -682,6 +734,8 @@ export class ScanBatchService {
         score: Math.round(score * 1000) / 1000,
         distance_m: this.distanceTo(photo, member, learned.get(member.id)),
         spread_m: learned.get(member.id)?.spread_m ?? null,
+        cluster_group_id: member.cluster_group_id ?? null,
+        sequence_index: member.sequence_index ?? null,
       });
     }
 
@@ -768,6 +822,22 @@ export class ScanBatchService {
       // เลขมิเตอร์แยกไม่ออก — ลองใช้พิกัดช่วยตัด
       // ให้ได้แค่ medium เท่านั้น เพราะ GPS แยกมิเตอร์ที่ห่างกัน 4-20 เมตรไม่ได้จริง
       // ใช้ได้แค่ตอนที่ "ใกล้ชัด ๆ กับหลังหนึ่ง และไกลชัด ๆ จากอีกหลัง"
+      // ═══ ห้ามใช้พิกัดตัดสินภายในกลุ่มมิเตอร์ที่ติดกันเด็ดขาด ═══
+      //
+      // ระยะที่ต่างกันระหว่างสองหลังในกลุ่มคือ 30 ซม. ส่วนความคลาดเคลื่อนของการวัด
+      // คือหลายเมตร ผลลัพธ์ที่ได้จึงเป็นเสียงรบกวนล้วน ๆ ไม่ใช่ข้อมูล — และอันตรายกว่า
+      // การไม่ตอบ เพราะมันมาพร้อมตัวเลขเป็นเมตรที่ดูน่าเชื่อถือ
+      // ทางที่ถูกคือคืน ambiguous แล้วให้แอปพาไล่จดตามลำดับ sequence_index
+      if (ScanBatchService.sameCluster(top, second)) {
+        return {
+          confidence: 'ambiguous',
+          reason:
+            `บ้าน ${top.house_no} กับบ้าน ${second.house_no} ใช้มิเตอร์ที่ติดกันบนกำแพงเดียวกัน ` +
+            'ซึ่งห่างกันราว 30 ซม. — พิกัดจากมือถือคลาดเคลื่อนหลายเมตร จึงแยกตัวซ้าย/ตัวขวาไม่ได้ ' +
+            'กรุณาจดไล่ตามลำดับตำแหน่งที่แอปกำหนดให้ (ซ้ายไปขวา) แล้วเลือกบ้านตามตำแหน่งจริงครับ',
+        };
+      }
+
       const nearest = this.gpsTiebreak(top, second, farM);
       if (nearest) {
         return {
