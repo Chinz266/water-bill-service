@@ -5,8 +5,6 @@ import { JwtModule, JwtModuleOptions } from '@nestjs/jwt';
 import { APP_GUARD } from '@nestjs/core';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { RolesGuard } from './auth/roles.guard';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
 import { AdminController } from './controller/admin.controller';
 import { AdminService } from './service/admin.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -123,7 +121,6 @@ import { HousekeepingService } from './service/housekeeping.service';
     ]),
   ],
   controllers: [
-    AppController,
     AdminController,
     MemberController,
     WaterRatesController,
@@ -140,7 +137,6 @@ import { HousekeepingService } from './service/housekeeping.service';
     AuditController,
   ],
   providers: [
-    AppService,
     AdminService,
     MemberService,
     WaterRatesService,
