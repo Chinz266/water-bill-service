@@ -9,7 +9,7 @@
 -- reason จึงเป็น NOT NULL — การแก้ที่ไม่มีเหตุผลกำกับมีค่าเท่ากับไม่มีร่องรอย
 --
 -- รันคำสั่งนี้ครั้งเดียว:
---   mysql -u root water-bill-db < db/migrate-reading-edit-log.sql
+--   npm run migrate -- db/migrate-reading-edit-log.sql
 -- =====================================================================
 
 USE `water-bill-db`;

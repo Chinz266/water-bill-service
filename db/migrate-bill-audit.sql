@@ -5,7 +5,7 @@
 -- ระบบเดิมจึงทำงานต่อได้ทันทีหลังรัน ไม่ต้องไปเติมค่าย้อนหลังก่อน
 --
 -- รันคำสั่งนี้ครั้งเดียว:
---   mysql -u root water-bill-db < db/migrate-bill-audit.sql
+--   npm run migrate -- db/migrate-bill-audit.sql
 -- =====================================================================
 
 USE `water-bill-db`;

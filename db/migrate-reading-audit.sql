@@ -6,7 +6,7 @@
 -- ชิ้นเดียวที่แยก "เจอเคสแปลกจริง" ออกจาก "กดผ่านทุกใบจนด่านไร้ความหมาย" ได้
 --
 -- รันคำสั่งนี้ครั้งเดียว:
---   mysql -u root water-bill-db < db/migrate-reading-audit.sql
+--   npm run migrate -- db/migrate-reading-audit.sql
 -- =====================================================================
 
 USE `water-bill-db`;

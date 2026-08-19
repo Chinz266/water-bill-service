@@ -1,12 +1,14 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 /**
- * ฝากรูปมิเตอร์ที่ยังไม่รู้ว่าของบ้านไหนไว้ในคิว (ข้อมูลกำพร้า)
+ * ฝากรูปมิเตอร์ที่ยังออกบิลไม่ได้ไว้ในคิว ให้คนที่มีเวลาตรวจทีหลัง
  *
  * ใช้เมื่อคนเดินจดตัดสินใจหน้างานไม่ได้จริง ๆ:
  *   - OCR อ่านเลขไม่ออก (หน้าปัดฝ้า / โคลนบัง / แสงสะท้อน)
  *   - อ่านออกแต่ระบบเสนอหลายบ้านพอ ๆ กัน (confidence = ambiguous)
  *   - พิกัดไม่ตรงกับบ้านหลังไหนเลยในรัศมีที่เชื่อได้
+ *   - **รู้แล้วว่าบ้านไหน แต่ด่านตีกลับ** (หน่วยพุ่ง / เลขต่ำกว่าเดือนก่อน / จดสลับตัว)
+ *     แล้วคนหน้างานไม่กล้ากดยืนยันเอง → ส่ง `members_id` + `blocked_code` มาด้วย
  *
  * ดีกว่า "เดาแล้วกดไปก่อน" ซึ่งจบลงที่บิลผิดบ้าน และดีกว่า "ทิ้งรูปแล้วเดินกลับไปใหม่"
  */
@@ -63,6 +65,28 @@ export class CreateUnassignedReadingDto {
   captured_at?: string;
 
   @ApiPropertyOptional({
+    description:
+      'บ้านที่คนหน้างานเลือกไว้แล้ว — ส่งมาเมื่อรูปเข้าคิวเพราะ**ด่านตีกลับ** ไม่ใช่เพราะไม่รู้ว่าของใคร ' +
+      'คนตรวจจะได้ไม่ต้องไล่หาบ้านใหม่ (ยังเปลี่ยนบ้านตอนกดจับคู่ได้อยู่)',
+    example: 12,
+  })
+  members_id?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'รหัสด่านที่ตีกลับ (error code จาก POST /bills/scan เช่น HIGH_USAGE, METER_ROLLBACK, ' +
+      'CLUSTER_SEQUENCE_MISMATCH) — หน้าตรวจใช้ค่านี้ตัดสินว่าจะขึ้นช่องยืนยันตัวไหนให้กด',
+    example: 'HIGH_USAGE',
+  })
+  blocked_code?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'ข้อความที่ด่านตอบกลับตอนนั้น — เก็บไว้ให้คนตรวจเห็นสิ่งเดียวกับที่คนหน้างานเห็น',
+  })
+  blocked_reason?: string;
+
+  @ApiPropertyOptional({
     description: 'บันทึกของคนถ่าย เช่น "หน้าปัดมีโคลนบัง"',
   })
   note?: string;
@@ -81,11 +105,13 @@ export class CreateUnassignedReadingDto {
  * ปุ่ม confirm_* ทุกตัวจึงมีให้ใช้เหมือนกัน เผื่อโดนด่านไหนตีกลับ
  */
 export class AssignUnassignedDto {
-  @ApiProperty({
-    description: 'ID ของบ้านที่ตัดสินใจว่าเป็นเจ้าของรูปนี้',
+  @ApiPropertyOptional({
+    description:
+      'ID ของบ้านที่ตัดสินใจว่าเป็นเจ้าของรูปนี้ — ไม่ส่งมาจะใช้บ้านที่คนหน้างานเลือกไว้ (members_id ของแถว) ' +
+      'ต้องมีอย่างน้อยหนึ่งทาง ไม่งั้นไม่รู้ว่าจะออกบิลให้ใคร',
     example: 1,
   })
-  members_id!: number;
+  members_id?: number;
 
   @ApiProperty({ description: 'ID ของเรทค่าน้ำที่ใช้คำนวณ', example: 1 })
   water_rates_id!: number;

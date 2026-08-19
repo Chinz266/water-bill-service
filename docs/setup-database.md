@@ -14,9 +14,22 @@
 
 ---
 
-## Migration ที่ต้องรันเอง
+## Migration — `npm run migrate`
 
-ไม่มีตารางบันทึกว่ารัน migration ไหนไปแล้ว (ไม่ได้ใช้ TypeORM migration) ต้องเทียบ entity กับ DB เอง — ทุกไฟล์รันซ้ำไม่ได้ ถ้าคอลัมน์มีอยู่แล้วจะ error ให้ข้ามไป
+```powershell
+npm run migrate                              # รันทุกไฟล์ที่ยังไม่ได้รัน
+npm run migrate -- --status                  # ดูว่ารันอะไรไปแล้ว เหลืออะไร (ไม่แตะ DB)
+npm run migrate -- db/migrate-review-queue.sql   # รันไฟล์เดียว
+npm run migrate -- --baseline                # จด DB ที่รันมือมาก่อนแล้วเป็นจุดตั้งต้น
+```
+
+ตัวรันจดลงตาราง `schema_migrations` (ชื่อไฟล์ + checksum + เวลา) ซึ่ง**เพิ่งมี** — DB ที่รันมือมาก่อนหน้านี้ต้อง `--baseline` หนึ่งครั้ง ตัว baseline จะเช็ก `information_schema` ว่าตาราง/คอลัมน์ที่แต่ละไฟล์สร้างมีอยู่จริงไหมก่อนจด **ไม่ได้จดรวดทุกไฟล์** — ไฟล์ที่ของยังไม่ครบจะถูกปล่อยไว้ให้ `npm run migrate` รันจริง
+
+รันซ้ำได้: คำสั่งที่ล้มเพราะ "คอลัมน์/ตาราง/index มีอยู่แล้ว" จะถูกข้ามพร้อมพิมพ์บอก ไฟล์ที่เคยพังกลางทาง (DDL ของ MySQL ย้อนกลับไม่ได้) จึงรันต่อจนจบได้
+
+⚠️ เรียงลำดับด้วย**ชื่อไฟล์** ซึ่งไม่ใช่ลำดับที่ควรรันจริงเสมอไป (ดูข้อควรระวังเรื่องลำดับด้านล่าง) — ตั้ง DB ใหม่ทั้งก้อนให้ import `db/water-bill-db.sql` แล้วค่อย `--baseline`
+
+ตารางข้างล่างบอกว่าแต่ละไฟล์ทำอะไร ไม่ต้องรันทีละไฟล์เองแล้ว
 
 | ไฟล์                                 | ทำอะไร                                                                                | ต้องรันเมื่อ                          |
 | ------------------------------------ | ------------------------------------------------------------------------------------- | ------------------------------------- |
@@ -36,29 +49,23 @@
 | `db/migrate-village-usage-thresholds.sql` | เกณฑ์หน่วยน้ำผิดปกติรายหมู่บ้าน + `villages.gps_near_m`                            | ทุกฐานข้อมูล (ยังไม่อยู่ใน dump)      |
 | `db/migrate-admin-role.sql`          | `admin.admin_role` (`owner` / `staff`) — คุมว่าใครแก้บิลย้อนหลังได้                     | ทุกฐานข้อมูล (ยังไม่อยู่ใน dump)      |
 | `db/migrate-reading-edit-log.sql`    | ตาราง `meter_reading_logs` — ร่องรอยการแก้เลขมิเตอร์หลังออกบิล                          | ทุกฐานข้อมูล (ยังไม่อยู่ใน dump)      |
+| `db/migrate-meter-clusters.sql`      | `members.cluster_group_id` / `sequence_index` — มิเตอร์ที่ติดกันจน GPS แยกไม่ออก        | ทุกฐานข้อมูล (ยังไม่อยู่ใน dump)      |
+| `db/migrate-review-queue.sql`        | `unassigned_readings.members_id` / `blocked_code` / `blocked_reason` — คิวรอการตรวจสอบ  | **ต้องรันหลัง `migrate-unassigned-readings.sql`** |
 
-```powershell
-& "C:\xampp\mysql\bin\mysql.exe" -u root water-bill-db < db\migrate-reading-location.sql
-& "C:\xampp\mysql\bin\mysql.exe" -u root water-bill-db < db\migrate-meter-digits.sql
-& "C:\xampp\mysql\bin\mysql.exe" -u root water-bill-db < db\migrate-village-zipcode.sql
-& "C:\xampp\mysql\bin\mysql.exe" -u root water-bill-db < db\migrate-village-meter-pitch.sql
-& "C:\xampp\mysql\bin\mysql.exe" -u root water-bill-db < db\migrate-bill-audit.sql
-& "C:\xampp\mysql\bin\mysql.exe" -u root water-bill-db < db\migrate-reading-audit.sql
-& "C:\xampp\mysql\bin\mysql.exe" -u root water-bill-db < db\migrate-bill-arrears.sql
-& "C:\xampp\mysql\bin\mysql.exe" -u root water-bill-db < db\migrate-meters.sql
-& "C:\xampp\mysql\bin\mysql.exe" -u root water-bill-db < db\migrate-tenancies.sql
-& "C:\xampp\mysql\bin\mysql.exe" -u root water-bill-db < db\migrate-unassigned-readings.sql
-& "C:\xampp\mysql\bin\mysql.exe" -u root water-bill-db < db\migrate-village-usage-thresholds.sql
-& "C:\xampp\mysql\bin\mysql.exe" -u root water-bill-db < db\migrate-admin-role.sql
-& "C:\xampp\mysql\bin\mysql.exe" -u root water-bill-db < db\migrate-reading-edit-log.sql
-```
+ไม่มี `mysql` CLI ใน PATH บนเครื่องที่ใช้อยู่ (XAMPP ไม่ได้ใส่ให้) — `npm run migrate` ต่อผ่าน `mysql2` ที่มีอยู่ใน `node_modules` จึงไม่ต้องหาไฟล์ `mysql.exe` เอง
+
+ถ้าอยากรันด้วย CLI จริง ๆ ตัวมันอยู่ที่ `C:\xampp\mysql\bin\mysql.exe`
 
 ⚠️ `migrate-admin-role.sql` ตั้งผู้ดูแลที่มีอยู่แล้วทุกคนเป็น `owner` เพื่อไม่ให้ใครถูกตัดสิทธิ์
 กลางคัน — **ต้องไล่ลดคนที่ควรเป็น `staff` ด้วยมือหลังรัน** ไม่งั้นด่าน "ใครแก้บิลย้อนหลังได้"
 จะไม่ได้กันอะไรเลย (คำสั่งตัวอย่างอยู่ในคอมเมนต์ท้ายไฟล์)
 
-⚠️ **ลำดับสำคัญสองจุด** — `migrate-tenancies.sql` สร้าง FK ไปที่ `bills` จึงต้องรันหลังคอลัมน์
-ของ `migrate-bill-arrears.sql` ถูกเพิ่มแล้ว และ `migrate-meters.sql` ต้องมาก่อนไฟล์ที่อ้าง `meters`
+⚠️ **ลำดับสำคัญ** — `migrate-tenancies.sql` สร้าง FK ไปที่ `bills` จึงต้องรันหลังคอลัมน์
+ของ `migrate-bill-arrears.sql` ถูกเพิ่มแล้ว, `migrate-meters.sql` ต้องมาก่อนไฟล์ที่อ้าง `meters`,
+และ `migrate-review-queue.sql` ต้องมาหลัง `migrate-unassigned-readings.sql` (ตารางต้องมีก่อนถึงจะเพิ่มคอลัมน์ได้)
+
+ตอนนี้ข้อบังคับทั้งสามข้อ**บังเอิญตรงกับลำดับตัวอักษรพอดี** ตัวรันจึงยังปลอดภัย — แต่มันบังเอิญ
+ไม่ใช่การออกแบบ ไฟล์ใหม่ที่พึ่งไฟล์เก่าซึ่งชื่อเรียงหลังกว่า ต้องรันไฟล์นั้นเองก่อนด้วยมือ
 
 ไฟล์อื่นในโฟลเดอร์ `db/`:
 

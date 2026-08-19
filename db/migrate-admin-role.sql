@@ -9,7 +9,7 @@
 --    สองค่านี้ตอบคนละคำถาม: role = "เข้าหน้าไหนได้" / admin_role = "แก้ของเก่าได้แค่ไหน"
 --
 -- รันคำสั่งนี้ครั้งเดียว:
---   mysql -u root water-bill-db < db/migrate-admin-role.sql
+--   npm run migrate -- db/migrate-admin-role.sql
 -- =====================================================================
 
 USE `water-bill-db`;

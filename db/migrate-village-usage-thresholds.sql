@@ -13,7 +13,7 @@
 --   usage_spike_ratio (ค่ากลาง 5.0) → 409 ต้องกด confirm_high_usage
 --
 -- รันคำสั่งนี้ครั้งเดียว:
---   mysql -u root water-bill-db < db/migrate-village-usage-thresholds.sql
+--   npm run migrate -- db/migrate-village-usage-thresholds.sql
 -- =====================================================================
 
 USE `water-bill-db`;

@@ -10,7 +10,7 @@
 --    เอายอดเก่าไปปนจะทำให้ยอดค้างถูกนับซ้ำทุกเดือนที่ทบต่อกันไป
 --
 -- รันคำสั่งนี้ครั้งเดียว:
---   mysql -u root water-bill-db < db/migrate-bill-arrears.sql
+--   npm run migrate -- db/migrate-bill-arrears.sql
 -- =====================================================================
 
 USE `water-bill-db`;

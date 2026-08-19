@@ -14,7 +14,7 @@
 -- latitude ไม่ต้องแก้ — ไทยอยู่ที่ 5.6 – 20.5 เป็นเลข 2 หลัก decimal(10,8) พอดี
 --
 -- รันคำสั่งนี้ครั้งเดียว:
---   mysql -u root water-bill-db < db/migrate-longitude-precision.sql
+--   npm run migrate -- db/migrate-longitude-precision.sql
 -- =====================================================================
 
 USE `water-bill-db`;

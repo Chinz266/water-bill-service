@@ -9,7 +9,7 @@
 -- ของบ้านหลังนั้น จากเดิมที่ต้องรอให้จดผ่าน OCR ครบสองครั้งก่อน
 --
 -- รันคำสั่งนี้ครั้งเดียว:
---   mysql -u root water-bill-db < db/migrate-meters.sql
+--   npm run migrate -- db/migrate-meters.sql
 -- =====================================================================
 
 USE `water-bill-db`;

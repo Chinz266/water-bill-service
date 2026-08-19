@@ -21,7 +21,7 @@
 --    มี 3 หลักหน้าจุด ดู db/migrate-longitude-precision.sql
 --
 -- รันคำสั่งนี้ครั้งเดียว:
---   mysql -u root water-bill-db < db/migrate-reading-location.sql
+--   npm run migrate -- db/migrate-reading-location.sql
 -- =====================================================================
 
 USE `water-bill-db`;

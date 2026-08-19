@@ -23,7 +23,7 @@
 -- จึงต้องข้ามแถวที่เป็น NULL ตอนหาค่าอ้างอิง ไม่ใช่ถือว่าเป็น 0
 --
 -- รันคำสั่งนี้ครั้งเดียว:
---   mysql -u root water-bill-db < db/migrate-meter-digits.sql
+--   npm run migrate -- db/migrate-meter-digits.sql
 -- =====================================================================
 
 USE `water-bill-db`;

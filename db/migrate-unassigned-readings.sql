@@ -14,7 +14,7 @@
 -- เท่ากับต้องไล่แก้เงื่อนไขทุกจุดพร้อมกัน และจุดที่ลืมจะเงียบ ไม่ error
 --
 -- รันคำสั่งนี้ครั้งเดียว:
---   mysql -u root water-bill-db < db/migrate-unassigned-readings.sql
+--   npm run migrate -- db/migrate-unassigned-readings.sql
 -- =====================================================================
 
 USE `water-bill-db`;

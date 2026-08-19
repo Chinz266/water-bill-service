@@ -29,7 +29,7 @@
 -- (MySQL ยอมให้ NULL ซ้ำได้หลายแถวใน unique index — บ้านเดี่ยวจึงไม่ติดด่านนี้)
 --
 -- รันคำสั่งนี้ครั้งเดียว:
---   mysql -u root water-bill-db < db/migrate-meter-clusters.sql
+--   npm run migrate -- db/migrate-meter-clusters.sql
 -- =====================================================================
 
 USE `water-bill-db`;

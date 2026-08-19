@@ -13,6 +13,7 @@
     "prestart:dev": "ts-node -T scripts/free-ports.ts",
     "start:dev": "concurrently -n api,vision -c cyan,magenta --kill-others-on-fail \"npm:start:api\" \"npm:start:vision\"",
     "free-ports": "ts-node -T scripts/free-ports.ts",
+    "migrate": "ts-node -T scripts/migrate.ts",
     "start:api": "nest start --watch",
     "start:vision": "ts-node -T scripts/start-vision.ts",
     "start:debug": "nest start --debug --watch",
@@ -77,6 +78,10 @@
       "ts"
     ],
     "rootDir": "src",
+    "roots": [
+      "<rootDir>",
+      "<rootDir>/../scripts"
+    ],
     "testRegex": ".*\\.spec\\.ts$",
     "moduleNameMapper": {
       "^src/(.*)$": "<rootDir>/$1"

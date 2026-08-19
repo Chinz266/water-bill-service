@@ -10,7 +10,7 @@
 -- members_id คอลัมน์เดียวใน admin
 --
 -- รันคำสั่งนี้ครั้งเดียว:
---   mysql -u root water-bill-db < db/migrate-member-accounts.sql
+--   npm run migrate -- db/migrate-member-accounts.sql
 -- =====================================================================
 
 USE `water-bill-db`;

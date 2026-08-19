@@ -6,7 +6,7 @@
 -- ที่เพิ่งย้ายเข้าวันที่ 25 ได้บิลของทั้งเดือนรวมส่วนที่คนเก่าใช้ไป
 --
 -- รันคำสั่งนี้ครั้งเดียว:
---   mysql -u root water-bill-db < db/migrate-tenancies.sql
+--   npm run migrate -- db/migrate-tenancies.sql
 -- =====================================================================
 
 USE `water-bill-db`;

@@ -11,6 +11,25 @@ import { MemberEntity } from '../entity/member.entity';
 import { CreateMeterReadingDto } from '../dto/create-meter-reading.dto';
 import { PhotoMetadataService } from './photo-metadata.service';
 
+/**
+ * กรอบที่โมเดลชี้ว่าแถวตัวเลขสีดำอยู่ตรงไหน — สัดส่วน 0-1 ของภาพ ไม่ใช่พิกเซล
+ *
+ * ส่งเป็นสัดส่วนเพราะหน้าเว็บย่อรูปลงก่อนแสดงเสมอ พิกเซลของภาพต้นฉบับจึงใช้ตรง ๆ ไม่ได้
+ * (และเลขจะผิดทันทีที่ใครเปลี่ยนขนาดที่ย่อ) สัดส่วนคูณกับขนาดที่แสดงจริงได้เลย
+ *
+ * ⚠️ เป็นพิกัดของ "ภาพตามที่เก็บในไฟล์" — vision service ไม่หมุนภาพตาม EXIF Orientation
+ *    รูปมือถือที่ถ่ายแนวตั้งจะมีกรอบเอียง 90 องศาเทียบกับที่คนเห็น หน้าเว็บต้องหมุนกรอบ
+ *    ตาม EXIF ก่อนใช้เสมอ
+ */
+export interface MeterCropBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** 'digits' = กรอบของเลขสีดำ (แม่นกว่า), 'border' = ทั้งแถบเลขมิเตอร์ตอนอ่านหลักไม่ได้ */
+  source: 'digits' | 'border';
+}
+
 @Injectable()
 export class MeterReadingsService {
   private readonly logger = new Logger(MeterReadingsService.name);
@@ -95,6 +114,34 @@ export class MeterReadingsService {
     return digits.length > 0 ? digits.length : null;
   }
 
+  /**
+   * รับกรอบจาก vision service เท่าที่ใช้ได้จริง — ที่เหลือถือว่าไม่มี
+   *
+   * ค่านี้เดินทางไปจบที่การคูณกับขนาดภาพบนหน้าเว็บ ค่าที่หลุดกรอบ 0-1 หรือไม่ใช่ตัวเลข
+   * จะกลายเป็นกรอบครอปที่วางนอกรูปหรือกว้างเป็นศูนย์ ซึ่งดูเหมือนแอปพังทั้งที่ต้นเหตุ
+   * อยู่คนละ service — ตอบว่า "ไม่มีกรอบ" แล้วให้แอปใช้กรอบกลางภาพตามเดิมชัดเจนกว่า
+   */
+  private normalizeCropBox(raw: unknown): MeterCropBox | null {
+    const box = raw as Partial<MeterCropBox> | null | undefined;
+    if (!box) return null;
+
+    const { x, y, w, h } = box;
+    const inRange = [x, y, w, h].every(
+      (value) => typeof value === 'number' && Number.isFinite(value),
+    );
+    if (!inRange) return null;
+    if (x! < 0 || y! < 0 || w! <= 0 || h! <= 0) return null;
+    if (x! + w! > 1.0001 || y! + h! > 1.0001) return null;
+
+    return {
+      x: x!,
+      y: y!,
+      w: w!,
+      h: h!,
+      source: box.source === 'border' ? 'border' : 'digits',
+    };
+  }
+
   async extractMeterUnit(imageBuffer: Buffer) {
     const startTime = Date.now();
     this.logger.log('Starting water meter reading via YOLO vision service...');
@@ -131,6 +178,8 @@ export class MeterReadingsService {
         /** ค่าเฉลี่ยของทุกหลัก — ดูภาพรวมได้ แต่ห้ามเอามาเป็นด่าน (กลบหลักที่ไม่ชัด) */
         confidence_avg?: number;
         digit_count?: number;
+        /** กรอบแถวตัวเลขสำหรับตั้งกรอบครอปให้อัตโนมัติ — null เมื่อโมเดลไม่เห็นอะไรเลย */
+        crop_box?: MeterCropBox | null;
         message: string;
       };
 
@@ -164,6 +213,8 @@ export class MeterReadingsService {
           // ค่าเฉลี่ยกับจำนวนหลักที่โมเดลเห็น — ไว้โชว์ให้คนตรวจดูภาพรวม ไม่ใช่ด่าน
           confidence_avg: data.confidence_avg ?? null,
           digit_count: data.digit_count ?? null,
+          // กรอบสำหรับตั้ง auto-crop บนแอป — ไม่เกี่ยวกับเลขที่อ่านได้ในรอบนี้
+          crop_box: this.normalizeCropBox(data.crop_box),
           photo_taken,
           message: 'สกัดค่าตัวเลขสำเร็จ',
         };
@@ -181,6 +232,8 @@ export class MeterReadingsService {
         full_reading: null,
         meter_digits: null,
         confidence: 0,
+        // อ่านเลขไม่ได้ แต่ถ้าโมเดลยังเห็นกรอบมิเตอร์ก็ส่งไปให้คนลากต่อได้
+        crop_box: this.normalizeCropBox(data.crop_box),
         photo_taken,
         message:
           data.message ||

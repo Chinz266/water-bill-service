@@ -9,7 +9,7 @@
 -- ⚠️ ต้องรัน db/migrate-member-accounts.sql (สร้าง account_members) ให้เสร็จก่อน
 --
 -- รันคำสั่งนี้ครั้งเดียว:
---   mysql -u root water-bill-db < db/migrate-reports.sql
+--   npm run migrate -- db/migrate-reports.sql
 -- =====================================================================
 
 USE `water-bill-db`;

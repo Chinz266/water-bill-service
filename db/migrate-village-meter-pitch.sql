@@ -20,7 +20,7 @@
 -- จึงปลอดภัยที่จะรัน migration นี้โดยไม่ต้องไปกรอกค่าให้ครบก่อน
 --
 -- รันคำสั่งนี้ครั้งเดียว:
---   mysql -u root water-bill-db < db/migrate-village-meter-pitch.sql
+--   npm run migrate -- db/migrate-village-meter-pitch.sql
 -- =====================================================================
 
 USE `water-bill-db`;

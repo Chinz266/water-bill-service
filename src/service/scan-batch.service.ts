@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { MemberEntity } from '../entity/member.entity';
 import { VillageEntity } from '../entity/village.entity';
 import { BillsService } from './bills.service';
+import { RelativeDirection, RelativeDirectionUtil } from './relative-direction';
 import { MeterReadingsService } from './meter-readings.service';
 import { PhotoMetadata, PhotoMetadataService } from './photo-metadata.service';
 import { ScanBatchDto } from '../dto/scan-batch.dto';
@@ -47,6 +48,15 @@ export interface Candidate {
   cluster_group_id: string | null;
   /** ตำแหน่งในกลุ่ม เรียงซ้าย→ขวา (1 = ซ้ายสุด) — null เมื่อไม่ได้อยู่ในกลุ่ม */
   sequence_index: number | null;
+  /**
+   * จุดที่ถ่ายรูปอยู่ทางไหนของพิกัดที่ลงทะเบียนไว้ของบ้านหลังนี้ (บน/ล่าง/ซ้าย/ขวา)
+   *
+   * null = รูปไม่มีพิกัด หรือบ้านหลังนี้ยังไม่ได้กรอกพิกัด
+   *
+   * ⚠️ มีไว้ **ให้คนดูประกอบ** เท่านั้น ห้ามเอาไปตัดสินว่าเป็นบ้านไหน —
+   *    ดูธง `reliable` และเหตุผลเต็ม ๆ ที่ `RelativeDirectionUtil`
+   */
+  relative: RelativeDirection | null;
 }
 
 /** ผลการวิเคราะห์รูปหนึ่งใบ */
@@ -736,6 +746,17 @@ export class ScanBatchService {
         spread_m: learned.get(member.id)?.spread_m ?? null,
         cluster_group_id: member.cluster_group_id ?? null,
         sequence_index: member.sequence_index ?? null,
+        // เทียบกับพิกัด "ที่ลงทะเบียนไว้" ไม่ใช่พิกัดที่เรียนรู้มา — คำถามที่ป้ายนี้ตอบคือ
+        // "จุดที่ยืนถ่ายอยู่ทางไหนของหมุดที่กรอกไว้ตอนลงทะเบียนบ้าน"
+        relative: RelativeDirectionUtil.compare(
+          {
+            latitude: Number(member.latitude),
+            longitude: Number(member.longitude),
+          },
+          photo.latitude !== null && photo.longitude !== null
+            ? { latitude: photo.latitude, longitude: photo.longitude }
+            : null,
+        ),
       });
     }
 

@@ -17,7 +17,7 @@
 -- NULL = ยังไม่ได้กรอก ไม่ได้แปลว่าหมู่บ้านนั้นไม่มีรหัส
 --
 -- รันคำสั่งนี้ครั้งเดียว:
---   mysql -u root water-bill-db < db/migrate-village-zipcode.sql
+--   npm run migrate -- db/migrate-village-zipcode.sql
 -- =====================================================================
 
 USE `water-bill-db`;
