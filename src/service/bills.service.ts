@@ -19,6 +19,7 @@ import {
 } from '../entity/location.entity';
 import { BillArrearsEntity } from '../entity/bill-arrears.entity';
 import { MeterEntity } from '../entity/meter.entity';
+import { BillDeletionLogEntity } from '../entity/bill-deletion-log.entity';
 import { CreateBillDto } from 'src/dto/create-bill.dto';
 import { CreateBillFromScanDto } from 'src/dto/create-bill-from-scan.dto';
 import { MeterPhotoService } from './meter-photo.service';
@@ -1800,6 +1801,32 @@ export class BillsService {
    *
    * ปุ่มยืนยันตรงนี้จึงไม่มีความหมาย — คนที่กดคือคนเดียวกับที่พิมพ์เลขมา
    */
+  /**
+   * ค่าที่ client ส่งมาบอก "ที่มาของบ้าน" — ค่าที่ไม่รู้จักให้เป็น null ไม่ใช่โยน error
+   *
+   * ตั้งใจไม่ validate แบบเข้มงวด เพราะสองคอลัมน์นี้เป็นหลักฐานย้อนหลัง ไม่ใช่ด่าน
+   * การปฏิเสธทั้งบิลเพราะฟิลด์บันทึกประวัติสะกดมาแปลก ๆ คือการเอาของที่สำคัญน้อยกว่า
+   * ไปขวางของที่สำคัญกว่า (บิลที่คนไปยืนจดมาแล้ว) — เก็บ null ไว้แล้วนับแยกทีหลังได้
+   */
+  static normalizeMatchedBy(raw?: string): 'system' | 'manual' | 'none' | null {
+    const value = raw?.trim();
+    return value === 'system' || value === 'manual' || value === 'none'
+      ? value
+      : null;
+  }
+
+  static normalizeMatchConfidence(
+    raw?: string,
+  ): 'high' | 'medium' | 'ambiguous' | 'none' | null {
+    const value = raw?.trim();
+    return value === 'high' ||
+      value === 'medium' ||
+      value === 'ambiguous' ||
+      value === 'none'
+      ? value
+      : null;
+  }
+
   private assertEntryMethod(params: {
     entry_method?: string;
     has_photo?: boolean;
@@ -1844,6 +1871,30 @@ export class BillsService {
    * เหตุผลเดียวกับ MemberService.assertCoordinates() แต่โยน BadRequestException
    * ให้เข้าชุดกับด่านอื่น ๆ ของการออกบิล
    */
+  /**
+   * ทศนิยมที่คอลัมน์พิกัดเก็บได้จริง — decimal(10,8) / decimal(11,8)
+   *
+   * ═══ ทำไมต้องปัดเอง ไม่ปล่อยให้ MySQL ปัดตอน INSERT ═══
+   *
+   * EXIF เก็บพิกัดเป็นองศา/ลิปดา/พิลิปดา ซึ่งแปลงเป็นทศนิยมแล้วได้เศษซ้ำเป็นปกติ
+   * (14°59'0.21" → 14.983391666666667) ค่าที่ส่งเข้ามาจึงยาวเกิน 8 ตำแหน่งแทบทุกครั้ง
+   *
+   * ด่านกันพิกัดซ้ำ (assertPhotoNotReused ชั้นที่ 2) คิวรีด้วยค่าดิบที่ยังไม่ปัด ไปเทียบกับ
+   * แถวในตารางที่ถูกปัดไปแล้วตอน INSERT — 14.983391666666667 ไม่มีวันเท่ากับ 14.98339167
+   * ด่านจึงเงียบทุกครั้ง แล้วแถวใหม่ก็ถูกปัดลงไปซ้ำกับแถวเดิมเป๊ะทุกทศนิยม
+   * ซึ่งเป็นสิ่งเดียวที่ด่านนั้นมีไว้กัน (พบจริงในตาราง: ทุกบ้านมีพิกัดซ้ำโดยไม่มีธงสักใบ)
+   *
+   * ปัดที่จุดเดียวตรงนี้ ทั้งค่าที่เอาไปเทียบและค่าที่บันทึกจึงเป็นเลขตัวเดียวกันเสมอ
+   * แนวเดียวกับ read_confidence ที่ปัดให้พอดี decimal(4,3) ก่อนลงตาราง
+   */
+  static readonly COORDINATE_SCALE = 8;
+
+  /** ปัดพิกัดให้พอดีกับ scale ของคอลัมน์ — ปัดออกจากศูนย์เหมือน MySQL ไม่ใช่ปัดขึ้นแบบ Math.round */
+  static roundCoordinate(value: number): number {
+    const factor = 10 ** BillsService.COORDINATE_SCALE;
+    return (Math.sign(value) * Math.round(Math.abs(value) * factor)) / factor;
+  }
+
   private parseLocation(dto: CreateBillFromScanDto): {
     latitude: number | null;
     longitude: number | null;
@@ -1864,7 +1915,7 @@ export class BillsService {
           `${label} "${String(value)}" ไม่ถูกต้อง ต้องเป็นตัวเลขระหว่าง -${limit} ถึง ${limit} ครับ`,
         );
       }
-      return num;
+      return BillsService.roundCoordinate(num);
     };
 
     const accuracy = Number(dto.gps_accuracy_m);
@@ -2080,6 +2131,14 @@ export class BillsService {
           let orphanedPhoto: string | null = null;
           if (prep.existing) {
             const oldBill = prep.existing;
+            // จดทับก็คือการลบบิลใบหนึ่งทิ้ง — ต้องเหลือร่องรอยเหมือนกับ remove()
+            // ติด reason ไว้ให้แยกออกจากการลบเพราะเลือกบ้านผิด ซึ่งเป็นคนละเรื่องกัน
+            await this.logBillDeletion(
+              manager,
+              oldBill,
+              'replace — จดทับด้วยใบใหม่ของบ้านเดียวกัน',
+              dto.create_by ?? null,
+            );
             await manager.delete(BillEntity, oldBill.id);
             const stillUsed = await manager.count(BillEntity, {
               where: { meter_readings_id: oldBill.meter_readings_id },
@@ -2123,6 +2182,13 @@ export class BillsService {
               // เก็บไว้เป็นหลักฐานว่าตอนออกบิลระบบมั่นใจแค่ไหน ไม่ใช่แค่ตรวจแล้วทิ้ง
               read_confidence: prep.read_confidence,
               entry_method: prep.entry_method,
+              // ที่มาของ "บ้าน" ในใบนี้ — หลักฐานย้อนหลังล้วน ๆ ไม่มีด่านไหนอ่านค่านี้
+              // (ถ้าวันหนึ่งมีด่านอ่าน ให้ย้อนไปอ่าน migrate-match-provenance.sql ก่อน:
+              //  ค่ามาจาก client ซึ่งปลอมได้ ต่างจาก read_confidence ที่หลังบ้านคิดเอง)
+              matched_by: BillsService.normalizeMatchedBy(dto.matched_by),
+              match_confidence: BillsService.normalizeMatchConfidence(
+                dto.match_confidence,
+              ),
               // รหัสจากมือถือ — UNIQUE ระดับ DB คือสิ่งที่กันบิลซ้ำตอน auto-sync จริง
               client_uuid: dto.client_uuid ?? null,
               // รูปผูกกับ "การจดครั้งนี้" ไม่ใช่กับบิล เพราะบิลออกใหม่ทับได้
@@ -3025,6 +3091,52 @@ export class BillsService {
     return await this.billRepository.findOne({ where: { id } });
   }
 
+  /**
+   * เก็บสำเนาของบิลที่กำลังจะถูกลบ พร้อมที่มาของการจับคู่บ้าน
+   *
+   * ต้องเรียก **ก่อน** ลบแถว และอยู่ในทรานแซกชันเดียวกัน — เพราะสิ่งที่ต้องเก็บคือ
+   * matched_by / match_confidence ซึ่งอยู่บน meter_readings ที่กำลังจะถูกลบไปด้วย
+   * ถ้าเก็บทีหลังหรือแยกทรานแซกชัน จะไม่เหลืออะไรให้อ่านแล้ว
+   *
+   * ล้มแล้วต้องพาทั้งทรานแซกชันล้มตาม ไม่ดักกลืน — บิลที่หายไปโดยไม่มีร่องรอย
+   * คือสภาพเดิมที่ตารางนี้ถูกสร้างมาแก้พอดี
+   */
+  private async logBillDeletion(
+    manager: EntityManager,
+    bill: BillEntity,
+    reason: string | null,
+    deletedBy?: number | null,
+  ): Promise<void> {
+    const reading = await manager.findOne(MeterReadingEntity, {
+      where: { id: bill.meter_readings_id },
+    });
+
+    // อ่านเลขที่บ้านไว้เป็นข้อความ — บ้านถูกลบทีหลังได้ แล้ว log ที่เหลือแต่ id จะอ่านไม่ออก
+    const member = reading?.members_id
+      ? await manager.findOne(MemberEntity, {
+          where: { id: reading.members_id },
+        })
+      : null;
+
+    await manager.save(
+      manager.create(BillDeletionLogEntity, {
+        bills_id: bill.id,
+        meter_readings_id: bill.meter_readings_id ?? null,
+        members_id: reading?.members_id ?? null,
+        house_no: member?.house_no ?? null,
+        billing_month: bill.billing_month ?? null,
+        billing_year: bill.billing_year ?? null,
+        meter_unit: reading?.meter_unit ?? null,
+        total_amount: bill.total_amount ?? null,
+        matched_by: reading?.matched_by ?? null,
+        match_confidence: reading?.match_confidence ?? null,
+        entry_method: reading?.entry_method ?? null,
+        reason,
+        deleted_by: deletedBy ?? null,
+      }),
+    );
+  }
+
   async remove(id: number) {
     const bill = await this.billRepository.findOne({ where: { id } });
     if (!bill) {
@@ -3047,6 +3159,9 @@ export class BillsService {
     let removedPhoto: string | null = null;
 
     await this.billRepository.manager.transaction(async (manager) => {
+      // ต้องเก็บก่อนลบ — ที่มาของการจับคู่บ้านอยู่บนแถวการจดที่กำลังจะหายไปด้วย
+      await this.logBillDeletion(manager, bill, null, null);
+
       await manager.delete(BillEntity, id);
 
       const otherBills = await manager.count(BillEntity, {

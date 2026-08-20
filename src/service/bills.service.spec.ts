@@ -511,6 +511,59 @@ describe('BillsService — ด่านตรวจก่อนออกบิ�
         ),
       ).resolves.toBeDefined();
     });
+
+    it('ปัดพิกัดให้พอดีกับ scale ของคอลัมน์ (ปัดออกจากศูนย์เหมือน MySQL)', () => {
+      // EXIF แปลงจาก DMS แล้วได้เศษซ้ำ — ยาวเกิน 8 ตำแหน่งที่คอลัมน์เก็บได้
+      expect(BillsService.roundCoordinate(14.983391666666667)).toBe(14.98339167);
+      expect(BillsService.roundCoordinate(102.12281666666667)).toBe(102.12281667);
+      // ค่าที่สั้นอยู่แล้วต้องไม่ถูกแตะ
+      expect(BillsService.roundCoordinate(14.9799)).toBe(14.9799);
+      // ครึ่งพอดีปัดออกจากศูนย์ทั้งสองทาง ไม่ใช่ปัดขึ้นแบบ Math.round
+      expect(BillsService.roundCoordinate(-1.000000005)).toBe(-1.00000001);
+    });
+
+    /**
+     * ด่านกันพิกัดซ้ำคิวรีด้วยค่าที่ส่งเข้ามา ไปเทียบกับแถวที่ MySQL ปัดไว้แล้วตอน INSERT
+     * ถ้าไม่ปัดก่อน 14.983391666666667 จะไม่มีวันเท่ากับ 14.98339167 ที่อยู่ในตาราง
+     * ด่านจึงเงียบทุกครั้ง แล้วแถวใหม่ก็ถูกปัดลงไปซ้ำกับแถวเดิมเป๊ะ ซึ่งเป็นสิ่งที่ด่านมีไว้กัน
+     */
+    it('เทียบด่านกันพิกัดซ้ำด้วยค่าที่ปัดแล้ว ไม่ใช่ค่าดิบจาก EXIF', async () => {
+      givenBaseline(1250);
+
+      await service.createFromScan(
+        dto({ latitude: 14.983391666666667, longitude: 102.12281666666667 }),
+      );
+
+      const calls = meterReadingRepository.findOne.mock.calls as unknown[][];
+      const coordinateLookups = calls
+        .map((call) => (call[0] as { where?: Record<string, unknown> })?.where)
+        .filter((where) => where !== undefined && 'latitude' in where);
+
+      expect(coordinateLookups).toContainEqual(
+        expect.objectContaining({
+          latitude: 14.98339167,
+          longitude: 102.12281667,
+        }),
+      );
+    });
+
+    it('บันทึกพิกัดที่ปัดแล้วลงตาราง จะได้เป็นเลขตัวเดียวกับที่ด่านใช้เทียบ', async () => {
+      givenBaseline(1250);
+
+      await service.createFromScan(
+        dto({ latitude: 14.983391666666667, longitude: 102.12281666666667 }),
+      );
+
+      const saved = txManager.create.mock.calls as unknown[][];
+      const reading = saved
+        .map((call) => call[1] as Record<string, unknown>)
+        .find((value) => value !== undefined && 'meter_unit' in value);
+
+      expect(reading).toMatchObject({
+        latitude: 14.98339167,
+        longitude: 102.12281667,
+      });
+    });
   });
 
   /**
@@ -1146,6 +1199,127 @@ describe('BillsService — ด่านตรวจก่อนออกบิ�
       await service.updateReading(5, edit(), OWNER);
 
       expect(photoService.remove).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * ที่มาของ "บ้าน" ในแต่ละใบ — คอลัมน์ที่ทำให้คำถาม "ระบบเลือกบ้านเองแล้วผิดกี่ %"
+   * ตอบได้เป็นครั้งแรก ก่อนหน้านี้ meter_readings เก็บแค่ entry_method ซึ่งตอบเรื่องเลข
+   * ไม่ได้ตอบเรื่องบ้าน และแถวที่ถืออยู่ก็ถูกลบทิ้งทุกครั้งที่มีคนไปแก้ใบที่ผิด
+   */
+  describe('ร่องรอยว่าใครเลือกบ้านให้ใบนี้', () => {
+    /** ค่าที่ถูกส่งเข้า manager.create() สำหรับตารางที่มีคีย์ตัวชี้วัดนี้ */
+    const created = (marker: string): Record<string, unknown> | undefined => {
+      const calls = txManager.create.mock.calls as unknown[][];
+      return calls
+        .map((call) => call[1] as Record<string, unknown>)
+        .find((value) => value && marker in value);
+    };
+
+    it('เก็บที่มาของการจับคู่บ้านลงแถวการจด', async () => {
+      givenBaseline(1250);
+
+      await service.createFromScan(
+        dto({ matched_by: 'system', match_confidence: 'high' }),
+      );
+
+      const reading = created('meter_unit')!;
+      expect(reading.matched_by).toBe('system');
+      expect(reading.match_confidence).toBe('high');
+    });
+
+    /**
+     * ค่ามาจาก client ซึ่งปลอมได้ ต่างจาก read_confidence ที่หลังบ้านคำนวณเอง —
+     * ค่าที่ไม่รู้จักจึงต้องกลายเป็น null เงียบ ๆ ไม่ใช่โยน error ทิ้งทั้งบิล
+     * (ฟิลด์บันทึกประวัติห้ามขวางบิลที่คนไปยืนจดมาแล้ว)
+     */
+    it('ค่าที่ไม่รู้จักเก็บเป็น null ไม่ใช่ปฏิเสธทั้งใบ', async () => {
+      givenBaseline(1250);
+
+      await expect(
+        service.createFromScan(
+          dto({ matched_by: 'ระบบเดาเอง', match_confidence: 'มั่นใจมาก' }),
+        ),
+      ).resolves.toBeDefined();
+
+      const reading = created('meter_unit')!;
+      expect(reading.matched_by).toBeNull();
+      expect(reading.match_confidence).toBeNull();
+    });
+
+    it('หน้าเว็บรุ่นเก่าที่ยังไม่ส่งฟิลด์นี้มา ต้องออกบิลได้ตามเดิม', async () => {
+      givenBaseline(1250);
+
+      await expect(service.createFromScan(dto())).resolves.toBeDefined();
+      expect(created('meter_unit')!.matched_by).toBeNull();
+    });
+
+    /**
+     * บ้านของบิลที่ออกไปแล้วแก้ไม่ได้ (UpdateReadingDto ไม่มี members_id) ทางแก้
+     * "ออกบิลผิดบ้าน" จึงมีทางเดียวคือลบทิ้งแล้วออกใหม่ — และ remove() ลบแถวการจด
+     * ที่ถือ matched_by ไปด้วยเสมอ ถ้าไม่เก็บสำเนาก่อน หลักฐานของความผิดพลาด
+     * จะถูกลบทิ้งพอดีกับจังหวะที่มันมีค่าที่สุด
+     */
+    describe('ลบบิลทิ้ง', () => {
+      const givenBillToDelete = () => {
+        billRepository.findOne.mockResolvedValue({
+          id: 7,
+          meter_readings_id: 42,
+          billing_month: '08',
+          billing_year: '2026',
+          total_amount: 250,
+          payment_status: 'Unpaid',
+        });
+        txManager.findOne.mockImplementation((entity: { name?: string }) =>
+          Promise.resolve(
+            entity === MeterReadingEntity
+              ? {
+                  id: 42,
+                  members_id: 3,
+                  meter_unit: 1250,
+                  matched_by: 'system',
+                  match_confidence: 'high',
+                  entry_method: 'ocr',
+                  evidence_photo: null,
+                }
+              : { id: 3, house_no: '99/1' },
+          ),
+        );
+      };
+
+      it('เก็บสำเนาที่มาของการจับคู่บ้านไว้ก่อนลบ', async () => {
+        givenBillToDelete();
+
+        await service.remove(7);
+
+        const log = created('bills_id')!;
+        expect(log.matched_by).toBe('system');
+        expect(log.match_confidence).toBe('high');
+        expect(log.members_id).toBe(3);
+        // เลขที่บ้านเก็บซ้ำเป็นข้อความ ไว้อ่านออกแม้บ้านถูกลบทีหลัง
+        expect(log.house_no).toBe('99/1');
+      });
+
+      it('ต้องเขียน log ก่อนลบแถว ไม่ใช่หลัง — แถวที่ถือค่าจะหายไปแล้ว', async () => {
+        givenBillToDelete();
+
+        await service.remove(7);
+
+        const logOrder = txManager.save.mock.invocationCallOrder[0];
+        const deleteOrder = txManager.delete.mock.invocationCallOrder[0];
+        expect(logOrder).toBeLessThan(deleteOrder);
+      });
+
+      it('บิลที่จ่ายเงินแล้วยังลบไม่ได้เหมือนเดิม และต้องไม่เหลือ log ค้างไว้', async () => {
+        billRepository.findOne.mockResolvedValue({
+          id: 7,
+          meter_readings_id: 42,
+          payment_status: 'Paid',
+        });
+
+        await expect(service.remove(7)).rejects.toThrow(ConflictException);
+        expect(txManager.save).not.toHaveBeenCalled();
+      });
     });
   });
 });

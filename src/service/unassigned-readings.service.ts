@@ -569,7 +569,13 @@ export class UnassignedReadingsService {
     return Math.round(Math.min(num, 1) * 1000) / 1000;
   }
 
-  /** เหตุผลเดียวกับ BillsService.parseLocation — ค่านอกช่วงจะไปพังที่ MySQL เป็น 1264 */
+  /**
+   * เหตุผลเดียวกับ BillsService.parseLocation — ค่านอกช่วงจะไปพังที่ MySQL เป็น 1264
+   *
+   * ปัดให้พอดีกับ scale ของคอลัมน์ด้วยเหตุผลเดียวกัน (ดู BillsService.COORDINATE_SCALE):
+   * แถวที่เก็บค่าดิบไว้จะไม่ตรงกับค่าที่ assign() ส่งต่อเข้าด่านของ BillsService
+   * ซึ่งทำให้ด่านกันพิกัดซ้ำเทียบพลาดในทิศเดียวกับที่เพิ่งแก้ไป
+   */
   private parseCoordinate(
     value: number | undefined,
     label: string,
@@ -584,7 +590,7 @@ export class UnassignedReadingsService {
         `${label} "${String(value)}" ไม่ถูกต้อง ต้องเป็นตัวเลขระหว่าง -${limit} ถึง ${limit} ครับ`,
       );
     }
-    return num;
+    return BillsService.roundCoordinate(num);
   }
 
   private parseCapturedAt(raw: string | undefined): Date | null {

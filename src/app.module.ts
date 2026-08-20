@@ -20,6 +20,7 @@ import { VillagesController } from './controller/villages.controller';
 import { VillagesService } from './service/villages.service';
 import { VillageEntity } from './entity/village.entity';
 import { MeterReadingEntity } from './entity/meter-reading.entity';
+import { BillDeletionLogEntity } from './entity/bill-deletion-log.entity';
 import { MeterReadingsController } from './controller/meter-readings.controller';
 import { MeterReadingsService } from './service/meter-readings.service';
 import { MeterPhotoService } from './service/meter-photo.service';
@@ -118,6 +119,7 @@ import { HousekeepingService } from './service/housekeeping.service';
       ReadingFlagEntity,
       MeterReadingLogEntity,
       UnassignedReadingEntity,
+      BillDeletionLogEntity,
     ]),
   ],
   controllers: [
