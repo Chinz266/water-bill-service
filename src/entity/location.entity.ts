@@ -49,8 +49,12 @@ export class SubdistrictEntity {
   @Column({ length: 150 })
   name_in_thai!: string;
 
-  @Column({ length: 150 })
-  name_in_english!: string;
+  // 🌟 ข้อมูลตำบล 271 แถวไม่มีชื่ออังกฤษจริง ๆ (เช็คจากข้อมูลในดัมป์แล้ว)
+  //    ประกาศเป็น non-null ไว้เฉย ๆ ทำให้โค้ดที่อ่านค่าไปต่อไม่ต้องเช็ค null
+  //    ทั้งที่มีโอกาสเจอ null จริง — คนละเรื่องกับ provinces/districts ที่ครบทุกแถว
+  // ต้องระบุ type ตรง ๆ — TypeORM เดาชนิดจาก `string | null` ไม่ได้ (มองเป็น Object)
+  @Column({ type: 'varchar', length: 150, nullable: true })
+  name_in_english!: string | null;
 
   @Column()
   district_id!: number;

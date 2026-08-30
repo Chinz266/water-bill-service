@@ -8,7 +8,13 @@
 --   npm run migrate -- db/migrate-bill-audit.sql
 -- =====================================================================
 
-USE `water-bill-db`;
+-- ต้องรันหลังไฟล์เหล่านี้ (ตัวรันจัดลำดับให้เองตามบรรทัดนี้ ดู scripts/migrate.ts):
+--   migrate-meter-digits.sql — ต่อท้าย meter_readings.meter_digits
+--   migrate-village-meter-pitch.sql — ต่อท้าย villages.meter_pitch_m
+-- requires: migrate-meter-digits.sql, migrate-village-meter-pitch.sql
+
+-- ฐานข้อมูลมาจาก DB_DATABASE ใน .env (ตัวรันเลือกให้ตอนต่อ) — ไฟล์นี้จึงไม่ USE เอง
+-- รันด้วยมือใน phpMyAdmin/CLI ต้องเลือกฐานข้อมูลก่อน
 
 SET NAMES utf8mb4;
 
@@ -77,15 +83,15 @@ ALTER TABLE `villages`
 -- ตรวจผลลัพธ์
 SELECT 'bills' AS `table`, `COLUMN_NAME`, `COLUMN_TYPE`, `IS_NULLABLE`
 FROM information_schema.COLUMNS
-WHERE TABLE_SCHEMA = 'water-bill-db' AND TABLE_NAME = 'bills'
+WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'bills'
   AND COLUMN_NAME IN ('due_date', 'period_months')
 UNION ALL
 SELECT 'meter_readings', `COLUMN_NAME`, `COLUMN_TYPE`, `IS_NULLABLE`
 FROM information_schema.COLUMNS
-WHERE TABLE_SCHEMA = 'water-bill-db' AND TABLE_NAME = 'meter_readings'
+WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'meter_readings'
   AND COLUMN_NAME = 'read_confidence'
 UNION ALL
 SELECT 'villages', `COLUMN_NAME`, `COLUMN_TYPE`, `IS_NULLABLE`
 FROM information_schema.COLUMNS
-WHERE TABLE_SCHEMA = 'water-bill-db' AND TABLE_NAME = 'villages'
+WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'villages'
   AND COLUMN_NAME = 'payment_due_days';

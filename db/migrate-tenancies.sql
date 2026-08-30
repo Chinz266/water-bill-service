@@ -9,7 +9,13 @@
 --   npm run migrate -- db/migrate-tenancies.sql
 -- =====================================================================
 
-USE `water-bill-db`;
+-- ต้องรันหลังไฟล์เหล่านี้ (ตัวรันจัดลำดับให้เองตามบรรทัดนี้ ดู scripts/migrate.ts):
+--   migrate-bill-arrears.sql — FK ไปที่ bills หลังคอลัมน์ยอดค้างถูกเพิ่มแล้ว
+--   migrate-bill-audit.sql — ต่อท้าย bills.period_months
+-- requires: migrate-bill-arrears.sql, migrate-bill-audit.sql
+
+-- ฐานข้อมูลมาจาก DB_DATABASE ใน .env (ตัวรันเลือกให้ตอนต่อ) — ไฟล์นี้จึงไม่ USE เอง
+-- รันด้วยมือใน phpMyAdmin/CLI ต้องเลือกฐานข้อมูลก่อน
 
 SET NAMES utf8mb4;
 
@@ -63,9 +69,9 @@ ALTER TABLE `bills`
 -- ตรวจผลลัพธ์
 SELECT `COLUMN_NAME`, `COLUMN_TYPE`, `IS_NULLABLE`
 FROM information_schema.COLUMNS
-WHERE TABLE_SCHEMA = 'water-bill-db' AND TABLE_NAME = 'bills'
+WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'bills'
   AND COLUMN_NAME IN ('tenancy_id', 'is_final');
 
 SELECT COUNT(*) AS `tenancies_table_exists`
 FROM information_schema.TABLES
-WHERE TABLE_SCHEMA = 'water-bill-db' AND TABLE_NAME = 'tenancies';
+WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tenancies';

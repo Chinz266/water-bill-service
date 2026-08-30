@@ -12,7 +12,8 @@
 --   npm run migrate -- db/migrate-reading-edit-log.sql
 -- =====================================================================
 
-USE `water-bill-db`;
+-- ฐานข้อมูลมาจาก DB_DATABASE ใน .env (ตัวรันเลือกให้ตอนต่อ) — ไฟล์นี้จึงไม่ USE เอง
+-- รันด้วยมือใน phpMyAdmin/CLI ต้องเลือกฐานข้อมูลก่อน
 
 SET NAMES utf8mb4;
 
@@ -49,4 +50,4 @@ CREATE TABLE IF NOT EXISTS `meter_reading_logs` (
 -- ตรวจผลลัพธ์
 SELECT COUNT(*) AS `meter_reading_logs_exists`
 FROM information_schema.TABLES
-WHERE TABLE_SCHEMA = 'water-bill-db' AND TABLE_NAME = 'meter_reading_logs';
+WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'meter_reading_logs';

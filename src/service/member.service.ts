@@ -85,14 +85,14 @@ export class MemberService {
     }
 
     // 1. สร้าง Instance ของ Entity ก่อน
-    // 🌟 คอลัมน์จริงใน DB สะกดว่า craete_by (ไม่ใช่ create_by) และห้ามเป็น NULL
+    // 🌟 create_by ห้ามเป็น NULL (คอลัมน์ NOT NULL + ติด FK กับ admin.id)
     //    ถ้าไม่ map ตรงนี้ ค่าจะหล่นหายแล้ว MySQL จะโยน 500 ออกมา
     const { create_by, ...memberData } = userData;
     const memberToSave = this.memberRepository.create({
       ...memberData,
       house_no: memberData.house_no?.trim(),
-      craete_by: create_by,
-      craeta_date: new Date(),
+      create_by,
+      create_date: new Date(),
     });
     // 2. แล้วค่อยบันทึก
     newMember = await this.memberRepository.save(memberToSave);
@@ -186,9 +186,8 @@ export class MemberService {
               latitude: dto.latitude,
               longitude: dto.longitude,
               villages_id: dto.villages_id,
-              // 🌟 คอลัมน์จริงใน DB สะกดว่า craete_by / craeta_date
-              craete_by: dto.create_by,
-              craeta_date: now,
+              create_by: dto.create_by,
+              create_date: now,
             }),
           );
 

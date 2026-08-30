@@ -1,6 +1,11 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { declaredObjects, splitStatements } from './migrate';
+import {
+  declaredObjects,
+  declaredRequires,
+  orderByDependency,
+  splitStatements,
+} from './migrate';
 
 /**
  * ตัวตัดคำสั่ง SQL ของ `npm run migrate`
@@ -96,5 +101,103 @@ describe('declaredObjects — ของที่ไฟล์นี้สร้�
       { table: 'unassigned_readings', column: 'blocked_code' },
       { table: 'unassigned_readings', column: 'blocked_reason' },
     ]);
+  });
+});
+
+/**
+ * ลำดับการรัน — ก่อนมี `-- requires:` ตัวรันเรียงตามชื่อไฟล์อย่างเดียว ซึ่งพาให้
+ * migrate-bill-audit.sql (ต่อท้าย villages.meter_pitch_m) ไปรันก่อนไฟล์ที่สร้างคอลัมน์นั้น
+ * แล้วพังทุกครั้งที่ตั้ง DB ใหม่ เทสต์ชุดนี้กันไม่ให้ลำดับกลับไปยึดชื่อไฟล์อีก
+ */
+describe('orderByDependency — เรียงตามที่ไฟล์ประกาศไว้', () => {
+  const make = (name: string, requires: string[] = []) => ({
+    name,
+    fullPath: '/db/' + name,
+    sql: '',
+    checksum: '',
+    requires,
+  });
+
+  it('ดันไฟล์ที่ถูกพึ่งพาขึ้นมาก่อน แม้ชื่อจะเรียงทีหลัง', () => {
+    const ordered = orderByDependency([
+      make('migrate-bill-audit.sql', ['migrate-village-meter-pitch.sql']),
+      make('migrate-village-meter-pitch.sql'),
+    ]);
+
+    expect(ordered.map((file) => file.name)).toEqual([
+      'migrate-village-meter-pitch.sql',
+      'migrate-bill-audit.sql',
+    ]);
+  });
+
+  it('ไฟล์ที่ไม่เกี่ยวข้องกันยังเรียงตามชื่อเหมือนเดิม', () => {
+    const ordered = orderByDependency([
+      make('migrate-a.sql'),
+      make('migrate-b.sql'),
+      make('migrate-c.sql'),
+    ]);
+
+    expect(ordered.map((file) => file.name)).toEqual([
+      'migrate-a.sql',
+      'migrate-b.sql',
+      'migrate-c.sql',
+    ]);
+  });
+
+  it('requires ที่ชี้ไปไฟล์ที่ไม่มีอยู่ → โยน error ไม่ใช่เงียบ ๆ ข้ามไป', () => {
+    expect(() =>
+      orderByDependency([make('migrate-a.sql', ['migrate-ไม่มีจริง.sql'])]),
+    ).toThrow('migrate-ไม่มีจริง.sql');
+  });
+
+  it('requires วนกลับมาหาตัวเอง → โยน error พร้อมบอกเส้นทาง', () => {
+    expect(() =>
+      orderByDependency([
+        make('migrate-a.sql', ['migrate-b.sql']),
+        make('migrate-b.sql', ['migrate-a.sql']),
+      ]),
+    ).toThrow(/วนกลับมาหาตัวเอง/);
+  });
+
+  it('ไฟล์จริงใน db/ เรียงแล้วต้องไม่มีใครมาก่อนของที่ตัวเองต้องการ', () => {
+    const dir = path.resolve(__dirname, '..', 'db');
+    const files = fs
+      .readdirSync(dir)
+      .filter((name) => /^migrate-.*\.sql$/.test(name))
+      .sort()
+      .map((name) => {
+        const sql = fs.readFileSync(path.join(dir, name), 'utf8');
+        return {
+          name,
+          fullPath: path.join(dir, name),
+          sql,
+          checksum: '',
+          requires: declaredRequires(sql),
+        };
+      });
+
+    const seen = new Set<string>();
+    for (const file of orderByDependency(files)) {
+      for (const name of file.requires) {
+        expect(seen.has(name)).toBe(true);
+      }
+      seen.add(file.name);
+    }
+  });
+});
+
+describe('declaredRequires — อ่านบรรทัด -- requires:', () => {
+  it('อ่านได้ทั้งแบบคั่นจุลภาคและหลายบรรทัด แล้วตัดตัวซ้ำทิ้ง', () => {
+    expect(
+      declaredRequires(
+        '-- requires: migrate-a.sql, migrate-b.sql\n' +
+          '-- requires: migrate-b.sql\n' +
+          'ALTER TABLE `x` ADD COLUMN `y` int;',
+      ),
+    ).toEqual(['migrate-a.sql', 'migrate-b.sql']);
+  });
+
+  it('ไฟล์ที่ไม่ประกาศอะไร → ไม่มีเงื่อนไขลำดับ', () => {
+    expect(declaredRequires('ALTER TABLE `x` ADD COLUMN `y` int;')).toEqual([]);
   });
 });

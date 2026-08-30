@@ -12,7 +12,12 @@
 --   npm run migrate -- db/migrate-reports.sql
 -- =====================================================================
 
-USE `water-bill-db`;
+-- ต้องรันหลังไฟล์เหล่านี้ (ตัวรันจัดลำดับให้เองตามบรรทัดนี้ ดู scripts/migrate.ts):
+--   migrate-member-accounts.sql — FK ไปที่บัญชีลูกบ้าน
+-- requires: migrate-member-accounts.sql
+
+-- ฐานข้อมูลมาจาก DB_DATABASE ใน .env (ตัวรันเลือกให้ตอนต่อ) — ไฟล์นี้จึงไม่ USE เอง
+-- รันด้วยมือใน phpMyAdmin/CLI ต้องเลือกฐานข้อมูลก่อน
 
 -- 🌟 บังคับ charset ของ connection เป็น utf8mb4 ก่อนเสมอ
 --    ไม่งั้นภาษาไทยจะถูกเข้ารหัสซ้อนสองชั้น (เก็บเป็น "เธชเธกเธเธฒเธข" แทน "สมชาย")

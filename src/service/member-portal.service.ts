@@ -70,9 +70,9 @@ export class MemberPortalService {
 
   // ข้อมูลผู้ดูแลไว้ให้ลูกบ้านติดต่อ (เช่น ถามเรื่องชำระเงิน)
   // ส่งเฉพาะชื่อกับเบอร์ ไม่แตะอีเมล/รหัสผ่าน — /admin/all เป็นสิทธิ์ admin ลูกบ้านเรียกเองไม่ได้
+  // ไม่ต้องกรอง role แล้ว: ทุกแถวในตาราง admin คือผู้ดูแล (บัญชีลูกบ้านอยู่ตาราง accounts)
   async getAdminContacts() {
     const admins = await this.memberRepository.manager.find(AdminEntity, {
-      where: { role: 'admin' },
       select: { id: true, fname: true, lname: true, phone: true, photo: true },
       order: { id: 'ASC' },
     });

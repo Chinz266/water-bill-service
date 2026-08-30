@@ -44,10 +44,27 @@ export class BillsController {
     private readonly scanBatchService: ScanBatchService,
   ) {}
 
+  /**
+   * 🌟 create_by มาจาก token ไม่ใช่จาก body
+   *
+   *   1. `bills.create_by` / `meter_readings.create_by` เป็น NOT NULL แต่ DTO ประกาศเป็น
+   *      optional — client ที่ไม่ส่งมาเคยได้ 500 ที่อ่านไม่รู้เรื่องจาก MySQL
+   *   2. หน้าเว็บส่ง 1 มาตายตัว บิลทุกใบจึงถูกจดว่าแอดมิน id 1 เป็นคนออก
+   *      ไม่ว่าใครล็อกอินอยู่ — ร่องรอย "ใครออกบิลใบนี้" ใช้ตอบอะไรไม่ได้เลย
+   *   3. ค่าจาก body ผู้ใช้แก้เองได้ (ดู current-user.decorator.ts)
+   *
+   * ค่าใน body ถูกทับทิ้งเสมอ เก็บฟิลด์ไว้ใน DTO เฉย ๆ กัน client เก่าพัง
+   */
   @Post()
   @ApiOperation({ summary: 'สร้างบิลค่าน้ำใหม่ (ระบบจะคำนวณยอดให้อัตโนมัติ)' })
-  async create(@Body() createBillDto: CreateBillDto) {
-    return await this.billsService.create(createBillDto);
+  async create(
+    @Body() createBillDto: CreateBillDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    return await this.billsService.create({
+      ...createBillDto,
+      create_by: user.sub,
+    });
   }
 
   @Post('scan')
@@ -55,8 +72,15 @@ export class BillsController {
     summary:
       'จดมิเตอร์ + ออกบิล ในคำสั่งเดียว (ตรวจให้ผ่านก่อนค่อยเขียน ทั้งคู่อยู่ในทรานแซกชันเดียว)',
   })
-  async createFromScan(@Body() dto: CreateBillFromScanDto) {
-    return await this.billsService.createFromScan(dto);
+  async createFromScan(
+    @Body() dto: CreateBillFromScanDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    // create_by มาจาก token ด้วยเหตุผลเดียวกับ POST /bills ข้างบน
+    return await this.billsService.createFromScan({
+      ...dto,
+      create_by: user.sub,
+    });
   }
 
   @Post('scan-batch')

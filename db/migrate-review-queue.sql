@@ -37,7 +37,12 @@
 --   npm run migrate -- db/migrate-review-queue.sql
 -- =====================================================================
 
-USE `water-bill-db`;
+-- ต้องรันหลังไฟล์เหล่านี้ (ตัวรันจัดลำดับให้เองตามบรรทัดนี้ ดู scripts/migrate.ts):
+--   migrate-unassigned-readings.sql — เพิ่มคอลัมน์ให้ตาราง unassigned_readings
+-- requires: migrate-unassigned-readings.sql
+
+-- ฐานข้อมูลมาจาก DB_DATABASE ใน .env (ตัวรันเลือกให้ตอนต่อ) — ไฟล์นี้จึงไม่ USE เอง
+-- รันด้วยมือใน phpMyAdmin/CLI ต้องเลือกฐานข้อมูลก่อน
 
 SET NAMES utf8mb4;
 

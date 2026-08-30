@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsDefined } from 'class-validator';
 
 /**
  * จดมิเตอร์ + ออกบิล ในคำสั่งเดียว (หน้าสแกนมิเตอร์ใช้ตัวนี้)
@@ -7,18 +8,24 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
  *    ทั้งหมดหลังบ้านคำนวณเอง ไม่งั้นแก้ยอดเงินจากฝั่ง client ได้
  */
 export class CreateBillFromScanDto {
+  // ตรวจแค่ "ส่งมาหรือเปล่า" ไม่ตรวจชนิด — เหตุผลเดียวกับ CreateBillDto
+  @IsDefined({ message: 'ต้องระบุ members_id (ID ของบ้าน)' })
   @ApiProperty({ description: 'ID ของบ้านที่จดมิเตอร์', example: 1 })
   members_id!: number;
 
+  @IsDefined({ message: 'ต้องระบุ water_rates_id (ID ของเรทค่าน้ำ)' })
   @ApiProperty({ description: 'ID ของเรทค่าน้ำที่ใช้คำนวณ', example: 1 })
   water_rates_id!: number;
 
+  @IsDefined({ message: 'ต้องระบุ current_unit (เลขมิเตอร์ครั้งนี้)' })
   @ApiProperty({ description: 'เลขมิเตอร์ที่จดได้ครั้งนี้', example: 1250 })
   current_unit!: number;
 
+  @IsDefined({ message: 'ต้องระบุ billing_month (บิลประจำเดือน)' })
   @ApiProperty({ description: 'บิลประจำเดือน (01-12)', example: '06' })
   billing_month!: string;
 
+  @IsDefined({ message: 'ต้องระบุ billing_year (บิลประจำปี)' })
   @ApiProperty({ description: 'บิลประจำปี (ค.ศ.)', example: '2026' })
   billing_year!: string;
 

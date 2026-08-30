@@ -17,7 +17,8 @@
 --   npm run migrate -- db/migrate-longitude-precision.sql
 -- =====================================================================
 
-USE `water-bill-db`;
+-- ฐานข้อมูลมาจาก DB_DATABASE ใน .env (ตัวรันเลือกให้ตอนต่อ) — ไฟล์นี้จึงไม่ USE เอง
+-- รันด้วยมือใน phpMyAdmin/CLI ต้องเลือกฐานข้อมูลก่อน
 
 ALTER TABLE `members`
   MODIFY COLUMN `longitude` decimal(11,8) DEFAULT NULL

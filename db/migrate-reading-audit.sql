@@ -9,7 +9,12 @@
 --   npm run migrate -- db/migrate-reading-audit.sql
 -- =====================================================================
 
-USE `water-bill-db`;
+-- ต้องรันหลังไฟล์เหล่านี้ (ตัวรันจัดลำดับให้เองตามบรรทัดนี้ ดู scripts/migrate.ts):
+--   migrate-bill-audit.sql — ต่อท้าย meter_readings.read_confidence
+-- requires: migrate-bill-audit.sql
+
+-- ฐานข้อมูลมาจาก DB_DATABASE ใน .env (ตัวรันเลือกให้ตอนต่อ) — ไฟล์นี้จึงไม่ USE เอง
+-- รันด้วยมือใน phpMyAdmin/CLI ต้องเลือกฐานข้อมูลก่อน
 
 SET NAMES utf8mb4;
 
@@ -103,9 +108,9 @@ ALTER TABLE `meter_readings`
 -- ตรวจผลลัพธ์
 SELECT `COLUMN_NAME`, `COLUMN_TYPE`, `IS_NULLABLE`
 FROM information_schema.COLUMNS
-WHERE TABLE_SCHEMA = 'water-bill-db' AND TABLE_NAME = 'meter_readings'
+WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'meter_readings'
   AND COLUMN_NAME IN ('entry_method', 'client_uuid', 'photo_purged_at');
 
 SELECT COUNT(*) AS `reading_flags_exists`
 FROM information_schema.TABLES
-WHERE TABLE_SCHEMA = 'water-bill-db' AND TABLE_NAME = 'reading_flags';
+WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'reading_flags';

@@ -20,6 +20,9 @@ import { MeterReadingsService } from '../service/meter-readings.service';
 import 'multer';
 import { CreateMeterReadingDto } from '../dto/create-meter-reading.dto'; // เช็ค Path ให้ตรงด้วยนะครับ
 import { Roles } from 'src/auth/roles.decorator';
+import { CurrentUser } from 'src/auth/current-user.decorator';
+// ต้องเป็น `import type` เพราะ tsconfig เปิด isolatedModules + emitDecoratorMetadata ไว้
+import type { JwtPayload } from 'src/auth/auth.constants';
 
 @ApiTags('Meter Readings (การจดมิเตอร์น้ำ)')
 // 🔐 ทั้ง controller นี้เป็นงานฝั่งผู้ดูแลหมู่บ้าน — ต้องล็อกอินเป็น admin เท่านั้น
@@ -32,8 +35,15 @@ export class MeterReadingsController {
 
   @Post()
   @ApiOperation({ summary: 'บันทึกการจดมิเตอร์น้ำประจำเดือนลงฐานข้อมูล' })
-  async create(@Body() createMeterReadingDto: CreateMeterReadingDto) {
-    return await this.meterReadingsService.create(createMeterReadingDto);
+  async create(
+    @Body() createMeterReadingDto: CreateMeterReadingDto,
+    @CurrentUser() user: JwtPayload,
+  ) {
+    // create_by มาจาก token ไม่ใช่ body — เหตุผลเดียวกับ BillsController.create
+    return await this.meterReadingsService.create({
+      ...createMeterReadingDto,
+      create_by: user.sub,
+    });
   }
 
   @Get()

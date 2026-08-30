@@ -57,7 +57,7 @@ export class MeterReadingsService {
   // --- ส่วนฟังก์ชัน CRUD ปกติ ---
   // ==========================================
   async create(createMeterReadingDto: CreateMeterReadingDto) {
-    // meter_readings.create_by / members_id1 ติด Foreign Key กับ admin.id และ members.id
+    // meter_readings.create_by / members_id ติด Foreign Key กับ admin.id และ members.id
     // ถ้าไม่เช็คก่อน MySQL จะโยน ER_NO_REFERENCED_ROW_2 ออกมาเป็น 500 ที่อ่านไม่รู้เรื่อง
     const { create_by, members_id } = createMeterReadingDto;
 

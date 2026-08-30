@@ -18,7 +18,7 @@ export class ReportEntity {
   @Column({ type: 'int' })
   members_id!: number;
 
-  // บัญชีลูกบ้านที่กดส่ง (อ้าง admin.id — admin เป็นตารางบัญชีร่วม แยกด้วย role)
+  // บัญชีลูกบ้านที่กดส่ง (อ้าง accounts.id — คนละตารางกับ admin ที่เป็นผู้ดูแล)
   @Column({ type: 'int' })
   account_id!: number;
 

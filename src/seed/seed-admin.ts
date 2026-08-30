@@ -161,9 +161,16 @@ async function main(): Promise<void> {
     email,
     // เก็บเฉพาะ hash ไม่เก็บรหัสจริง
     password: await bcrypt.hash(password, SALT_ROUNDS),
-    role: 'admin',
     createDate: new Date(),
   });
+
+  // ⚠️ แอดมินคนแรกของระบบต้องเป็น owner — migrate-admin-role.sql ยกผู้ดูแลที่ "มีอยู่แล้ว"
+  //    ขึ้นเป็น owner ให้ แต่บนเครื่องที่ตั้งใหม่ยังไม่มีใครเลยตอนที่ migration นั้นรัน
+  //    ถ้าไม่ตั้งตรงนี้ บัญชีเดียวของระบบจะได้ค่า default 'staff' แล้วแก้บิลย้อนหลังไม่ได้
+  //    ตั้งเฉพาะตอนตารางว่าง — บัญชีที่เปิดทีหลังยังเป็น staff ตามเดิม
+  if ((await repository.count()) === 0) {
+    admin.admin_role = 'owner';
+  }
 
   // ตารางอื่น (water_rates, villages, members, meter_readings) อ้าง create_by = 1 แบบ hardcode
   // เพราะยังไม่มีระบบ login ที่ส่ง id ของแอดมินที่ล็อกอินอยู่จริงมาให้
@@ -179,16 +186,23 @@ async function main(): Promise<void> {
   console.log(`   รหัสผ่าน: ${password}`);
 }
 
-main()
-  .catch((error: unknown) => {
+/** ให้สคริปต์อื่นเรียกได้ (db-setup) — โยน error ต่อ ไม่กลืนไว้เองเหมือนตอนรันเดี่ยว */
+export async function seedAdmin(): Promise<void> {
+  try {
+    await main();
+  } finally {
+    if (dataSource.isInitialized) {
+      await dataSource.destroy();
+    }
+  }
+}
+
+if (require.main === module) {
+  seedAdmin().catch((error: unknown) => {
     console.error(
       '❌ สร้างแอดมินเริ่มต้นไม่สำเร็จ:',
       error instanceof Error ? error.message : error,
     );
     process.exitCode = 1;
-  })
-  .finally(async () => {
-    if (dataSource.isInitialized) {
-      await dataSource.destroy();
-    }
   });
+}

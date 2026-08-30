@@ -33,7 +33,12 @@
 --   npm run migrate -- db/migrate-match-provenance.sql
 -- =====================================================================
 
-USE `water-bill-db`;
+-- ต้องรันหลังไฟล์เหล่านี้ (ตัวรันจัดลำดับให้เองตามบรรทัดนี้ ดู scripts/migrate.ts):
+--   migrate-reading-audit.sql — ต่อท้าย meter_readings.entry_method
+-- requires: migrate-reading-audit.sql
+
+-- ฐานข้อมูลมาจาก DB_DATABASE ใน .env (ตัวรันเลือกให้ตอนต่อ) — ไฟล์นี้จึงไม่ USE เอง
+-- รันด้วยมือใน phpMyAdmin/CLI ต้องเลือกฐานข้อมูลก่อน
 
 SET NAMES utf8mb4;
 
@@ -96,12 +101,12 @@ CREATE TABLE IF NOT EXISTS `bill_deletion_logs` (
 SELECT
   COUNT(*) AS `bill_deletion_logs_exists`
 FROM information_schema.TABLES
-WHERE TABLE_SCHEMA = 'water-bill-db' AND TABLE_NAME = 'bill_deletion_logs';
+WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'bill_deletion_logs';
 
 SELECT
   COUNT(*) AS `provenance_columns_added`
 FROM information_schema.COLUMNS
-WHERE TABLE_SCHEMA = 'water-bill-db'
+WHERE TABLE_SCHEMA = DATABASE()
   AND TABLE_NAME = 'meter_readings'
   AND COLUMN_NAME IN ('matched_by', 'match_confidence');
 

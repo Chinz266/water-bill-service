@@ -5,6 +5,7 @@ import { AuthRegisterDto } from 'src/dto/auth-register.dto';
 import { AuthLoginDto } from 'src/dto/auth-login.dto';
 import { MemberAuthDto } from 'src/dto/member-auth.dto';
 import { Public } from 'src/auth/public.decorator';
+import { Roles } from 'src/auth/roles.decorator';
 import { CurrentUser } from 'src/auth/current-user.decorator';
 // ต้องเป็น `import type` เพราะ tsconfig เปิด isolatedModules + emitDecoratorMetadata ไว้
 import type { JwtPayload } from 'src/auth/auth.constants';
@@ -14,9 +15,19 @@ import type { JwtPayload } from 'src/auth/auth.constants';
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
-  @Public()
+  /**
+   * ⚠️ เคยเป็น @Public() — ใครก็ตามที่ยิง request เข้ามาได้จะเปิดบัญชี role='admin'
+   *    ให้ตัวเองแล้วเข้าหลังบ้านได้ทันที (เห็นทะเบียนลูกบ้านทั้งหมด ออกบิล ลบบิล)
+   *    ที่กันไว้มีแค่ admin_role ที่ default เป็น staff ซึ่งกันได้แค่การแก้บิลย้อนหลัง
+   *
+   * ตอนนี้เป็น "แอดมินที่ล็อกอินอยู่เปิดบัญชีให้คนใหม่" — ไม่ใช่ "ใครก็สมัครเองได้"
+   * (ใช้แทน POST /admin/create ไม่ได้ เพราะ AdminCreateDto ไม่มีช่องอีเมล
+   *  ซึ่งเป็น username ของฝั่งผู้ดูแล บัญชีที่สร้างจากที่นั่นจึงล็อกอินไม่ได้)
+   */
+  @Roles('admin')
+  @ApiBearerAuth()
   @Post('register')
-  @ApiOperation({ summary: 'สมัครสมาชิกใหม่' })
+  @ApiOperation({ summary: 'เปิดบัญชีผู้ดูแลใหม่ (ต้องล็อกอินเป็นแอดมินก่อน)' })
   register(@Body() data: AuthRegisterDto) {
     return this.authService.register(data);
   }
@@ -28,21 +39,6 @@ export class AuthController {
   })
   login(@Body() data: AuthLoginDto) {
     return this.authService.login(data);
-  }
-
-  @Public()
-  @Post('google')
-  @ApiOperation({ summary: 'เข้าสู่ระบบด้วย Google (ยังไม่เปิดใช้งาน)' })
-  google() {
-    return this.authService.loginWithGoogle();
-  }
-
-  // สมัครสมาชิกลูกบ้าน — ต้องมีบ้านที่ลงทะเบียนเบอร์นี้ไว้แล้วในระบบเท่านั้น
-  @Public()
-  @Post('member/register')
-  @ApiOperation({ summary: 'สมัครบัญชีลูกบ้าน (ล็อกอินด้วยเบอร์โทร)' })
-  registerMember(@Body() data: MemberAuthDto) {
-    return this.authService.registerMember(data);
   }
 
   @Public()

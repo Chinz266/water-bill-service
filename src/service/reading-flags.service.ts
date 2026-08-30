@@ -82,7 +82,7 @@ export class ReadingFlagsService {
         'reading',
         'reading.id = flag.meter_readings_id',
       )
-      .leftJoin(MemberEntity, 'member', 'member.id = reading.members_id1')
+      .leftJoin(MemberEntity, 'member', 'member.id = reading.members_id')
       .addSelect([
         'reading.reading_date',
         'reading.meter_unit',
@@ -100,7 +100,7 @@ export class ReadingFlagsService {
       query.andWhere('flag.flag_type = :flagType', { flagType });
     }
     if (params.members_id) {
-      query.andWhere('reading.members_id1 = :membersId', {
+      query.andWhere('reading.members_id = :membersId', {
         membersId: params.members_id,
       });
     }

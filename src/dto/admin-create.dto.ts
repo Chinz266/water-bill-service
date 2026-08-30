@@ -19,8 +19,12 @@ export class AdminCreateDto {
   @ApiProperty({ description: 'Password of the admin', example: 'password123' })
   password!: string;
 
-  @ApiProperty({ description: 'Role of the admin', example: 'admin' })
-  role!: string;
+  /**
+   * @deprecated ไม่ถูกใช้แล้ว — ตาราง admin ไม่มีคอลัมน์ role ตั้งแต่แยก accounts ออกไป
+   * ยังรับไว้เฉย ๆ เพื่อไม่ให้ client รุ่นเก่าที่ยังส่งมาพัง (ค่าจะถูกทิ้ง)
+   */
+  @ApiProperty({ description: 'ไม่ใช้แล้ว', required: false })
+  role?: string;
 
   @ApiProperty({
     description:

@@ -16,7 +16,13 @@
 --   npm run migrate -- db/migrate-village-usage-thresholds.sql
 -- =====================================================================
 
-USE `water-bill-db`;
+-- ต้องรันหลังไฟล์เหล่านี้ (ตัวรันจัดลำดับให้เองตามบรรทัดนี้ ดู scripts/migrate.ts):
+--   migrate-village-meter-pitch.sql — ต่อท้าย villages.meter_pitch_m
+--   migrate-bill-audit.sql — ต่อท้าย villages.payment_due_days
+-- requires: migrate-village-meter-pitch.sql, migrate-bill-audit.sql
+
+-- ฐานข้อมูลมาจาก DB_DATABASE ใน .env (ตัวรันเลือกให้ตอนต่อ) — ไฟล์นี้จึงไม่ USE เอง
+-- รันด้วยมือใน phpMyAdmin/CLI ต้องเลือกฐานข้อมูลก่อน
 
 SET NAMES utf8mb4;
 
@@ -49,5 +55,5 @@ ALTER TABLE `villages`
 -- ตรวจผลลัพธ์
 SELECT `COLUMN_NAME`, `COLUMN_TYPE`, `IS_NULLABLE`
 FROM information_schema.COLUMNS
-WHERE TABLE_SCHEMA = 'water-bill-db' AND TABLE_NAME = 'villages'
+WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'villages'
   AND COLUMN_NAME IN ('usage_warn_ratio', 'usage_spike_ratio', 'usage_spike_floor', 'gps_near_m');

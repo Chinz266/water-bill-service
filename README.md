@@ -32,7 +32,7 @@
 
 ## เริ่มใช้งานครั้งแรก
 
-1. **ฐานข้อมูล** — สร้าง `water-bill-db`, import dump, รัน migration, seed แอดมิน → [docs/setup-database.md](docs/setup-database.md)
+1. **ฐานข้อมูล** — สั่ง `npm run db:setup` ครั้งเดียวจบ (สร้าง DB + import + migrate + seed) → [docs/setup-database.md](docs/setup-database.md)
 2. **Environment** — คัดลอก `.env.example` เป็น `.env` แล้วตั้ง `JWT_SECRET` (ไม่ตั้ง แอปล้มตอน boot โดยเจตนา)
 
    ```powershell
@@ -55,7 +55,8 @@ npm run start:dev
 ```
 
 `npm start` และ `npm run start:dev` สตาร์ท NestJS (`[api]`) พร้อม FastAPI (`[vision]`) เสมอ ต่างกันแค่ `start:dev` เปิด `--watch`
-`prestart` / `prestart:dev` เคลียร์พอร์ต 3000 กับ 8000 ให้ก่อนอัตโนมัติ
+`prestart` / `prestart:dev` เคลียร์พอร์ต 3000 กับ 8000 แล้วรัน migration ที่ค้างอยู่ให้ก่อนอัตโนมัติ
+(ดู [setup-database.md](docs/setup-database.md) — ต่อ MySQL ไม่ติดจะเตือนแล้วปล่อยผ่าน แต่ถ้า migration พังจะไม่ยอมให้เซิร์ฟเวอร์ขึ้น)
 (รันแยกได้: `npm run start:api`, `npm run start:vision`)
 
 **3. หน้าเว็บ**
@@ -89,10 +90,12 @@ ng serve
 | คำสั่ง               | ทำอะไร                                                |
 | -------------------- | ----------------------------------------------------- |
 | `npm run start:dev`  | รัน API + vision service พร้อม watch                  |
-| `npm test`           | unit test (ปัจจุบัน **81 เทสต์ ผ่านทั้งหมด**)         |
+| `npm test`           | unit test (ปัจจุบัน **206 เทสต์ ผ่านทั้งหมด**)         |
 | `npm run test:watch` | รันเทสต์ค้างไว้ แก้โค้ดแล้วรันซ้ำให้เอง               |
 | `npm run seed:admin` | เติมคอลัมน์ที่ตาราง `admin` ขาด + สร้างแอดมินเริ่มต้น |
 | `npm run free-ports` | เคลียร์พอร์ต 3000 / 8000 ที่ค้างอยู่                  |
+| `npm run db:setup`   | ตั้งฐานข้อมูลทั้งก้อนด้วยคำสั่งเดียว (สร้าง DB + import + migrate + seed) |
+| `npm run migrate`    | รัน migration ที่ยังไม่ได้รัน (`npm start` เรียกให้เองอยู่แล้ว) |
 | `npm run lint`       | ESLint + Prettier (แก้อัตโนมัติ)                      |
 | `npm run build`      | build ลง `dist/`                                      |
 
@@ -135,12 +138,17 @@ ng serve
 
 ผู้ใช้ 2 ชนิด แยก token คนละชุด
 
-| ชนิด              | สมัคร                        | ล็อกอินด้วย | เห็นอะไร                  |
-| ----------------- | ---------------------------- | ----------- | ------------------------- |
-| แอดมิน (หมู่บ้าน) | `POST /auth/register`        | อีเมล       | ทุกอย่าง                  |
-| ลูกบ้าน           | `POST /auth/member/register` | เบอร์โทร    | เฉพาะบ้านตัวเอง (`/me/*`) |
+| ชนิด              | เปิดบัญชียังไง                                   | ล็อกอินด้วย | เห็นอะไร                  |
+| ----------------- | ------------------------------------------------ | ----------- | ------------------------- |
+| แอดมิน (หมู่บ้าน) | `POST /auth/register` — **แอดมินที่ล็อกอินอยู่เป็นคนเปิดให้** | อีเมล       | ทุกอย่าง                  |
+| ลูกบ้าน           | เกิดเองตอนล็อกอินครั้งแรก (`POST /auth/member/login`) | เบอร์โทร    | เฉพาะบ้านตัวเอง (`/me/*`) |
 
-ลูกบ้านสมัครได้เฉพาะเบอร์ที่มีบ้านลงทะเบียนไว้แล้ว — ผูกผ่านตาราง `account_members` (บัญชีเดียวดูได้หลายบ้าน)
+🔐 `POST /auth/register` **ไม่ใช่หน้าสมัครสาธารณะ** — ของเดิมเป็น `@Public()` ซึ่งแปลว่า
+ใครก็เปิดบัญชีแอดมินให้ตัวเองแล้วเข้าหลังบ้านได้ทันที ตอนนี้ต้องล็อกอินเป็นแอดมินก่อน
+(หน้าเว็บย้ายทางเข้าไปไว้ที่หน้า "ตั้งค่าผู้ดูแล" แล้ว)
+
+ลูกบ้านไม่มีขั้นตอนสมัครแยก — ล็อกอินด้วยเบอร์ที่แอดมินลงทะเบียนไว้กับบ้านแล้วระบบเปิดบัญชีให้เอง
+สิทธิ์เห็นบ้านหลังไหนคุมที่ตาราง `account_members` (บัญชีเดียวดูได้หลายบ้าน)
 
 บัญชีแอดมินทดสอบ: `somying@example.com` / `password123` (มาจาก `npm run seed:admin` ไม่ได้มากับ dump)
 
@@ -152,7 +160,7 @@ API ป้องกันด้วย `JwtAuthGuard` + `RolesGuard` ที่ล
 
 | ไฟล์                                                | เนื้อหา                                                                     |
 | --------------------------------------------------- | --------------------------------------------------------------------------- |
-| [docs/setup-database.md](docs/setup-database.md)     | import dump, migration ที่ต้องรันเอง, seed แอดมิน, เรื่อง `decimal(11,8)`   |
+| [docs/setup-database.md](docs/setup-database.md)     | import dump, migration (รันเองพร้อมเซิร์ฟเวอร์), seed แอดมิน, เรื่อง `decimal(11,8)`   |
 | [docs/api.md](docs/api.md)                           | ตาราง endpoint ทั้งหมด, พอร์ทัลลูกบ้าน, สัญญาของ vision service             |
 | [docs/billing-rules.md](docs/billing-rules.md)       | เลขตั้งต้นที่ใช้คิดหน่วย, ด่านกันข้อมูลผิดตอนออกบิล, ลงทะเบียนแบบยืนที่มิเตอร์ |
 | [docs/scan-batch.md](docs/scan-batch.md)             | จับคู่รูปกับบ้าน, บทบาทของ GPS, EXIF หายง่ายแค่ไหน                          |
