@@ -1,3 +1,4 @@
+import { InputValue } from '../security/input-value';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 /**
@@ -19,21 +20,27 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
  */
 export class RegisterMemberOnsiteDto {
   @ApiProperty({ description: 'ชื่อจริง', example: 'สมชาย' })
+  @InputValue('text', { maxLength: 45 })
   fname!: string;
 
   @ApiProperty({ description: 'นามสกุล', example: 'ใจดี' })
+  @InputValue('text', { maxLength: 45 })
   lname!: string;
 
   @ApiProperty({ description: 'บ้านเลขที่', example: '99/9' })
+  @InputValue('text', { maxLength: 45 })
   house_no!: string;
 
   @ApiPropertyOptional({ description: 'เบอร์โทรศัพท์', example: '0812345678' })
+  @InputValue('text', { maxLength: 20 })
   phone?: string;
 
   @ApiProperty({ description: 'ID ของหมู่บ้าน', example: 1 })
+  @InputValue('integer', { min: 0, max: 2147483647 })
   villages_id!: number;
 
   @ApiProperty({ description: 'ID ของ Admin ผู้บันทึก', example: 1 })
+  @InputValue('integer', { min: 0, max: 2147483647 })
   create_by!: number;
 
   @ApiProperty({
@@ -42,12 +49,14 @@ export class RegisterMemberOnsiteDto {
       'ตอนยืนอยู่จริง ห้ามจิ้มจากแผนที่ ไม่งั้นจะเทียบกับตอนจดมิเตอร์ไม่ได้',
     example: 14.9799,
   })
+  @InputValue('number', { min: -90, max: 90 })
   latitude!: number;
 
   @ApiProperty({
     description: 'ลองจิจูดที่วัดได้ ณ จุดเดียวกัน',
     example: 102.097771,
   })
+  @InputValue('number', { min: -180, max: 180 })
   longitude!: number;
 
   @ApiPropertyOptional({
@@ -57,6 +66,7 @@ export class RegisterMemberOnsiteDto {
       'ความคลาดเคลื่อนเลยบวกกันสองชั้น ให้ยืนรอสัญญาณนิ่งก่อนแล้วกดใหม่ (วัดครั้งเดียวต่อบ้าน)',
     example: 12,
   })
+  @InputValue('number', { min: 0, max: 2147483647 })
   gps_accuracy_m?: number;
 
   @ApiProperty({
@@ -65,11 +75,13 @@ export class RegisterMemberOnsiteDto {
       'ถ้าไม่บันทึกไว้ บ้านหลังนี้จะโดนคิดค่าน้ำย้อนหลังตั้งแต่วันติดตั้งมิเตอร์',
     example: 1250,
   })
+  @InputValue('integer', { min: 0, max: 2147483647 })
   initial_meter_unit!: number;
 
   @ApiPropertyOptional({
     description:
       'รูปหน้าปัดมิเตอร์ตอนลงทะเบียน (data URL) เก็บเป็นหลักฐานของเลขตั้งต้น',
   })
+  @InputValue('text', { maxLength: 3145728 })
   meter_photo?: string;
 }

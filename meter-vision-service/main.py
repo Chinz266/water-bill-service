@@ -14,9 +14,13 @@ import io
 import os
 import logging
 
+# Serving an uploaded image must never trigger pip installation at runtime.
+os.environ["YOLO_AUTOINSTALL"] = "false"
+
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from PIL import Image
 from ultralytics import YOLO
+from upload_limits import UploadLimitMiddleware, MAX_FILE_BYTES, MAX_IMAGE_PIXELS
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("meter-vision")
@@ -53,6 +57,7 @@ CROP_PAD_X = 3.0
 CROP_ASPECT = 3.0
 
 app = FastAPI(title="Water Meter Vision Service", version="1.0.0")
+app.add_middleware(UploadLimitMiddleware)
 
 # โหลดโมเดลครั้งเดียวตอน start service (แพงที่สุด ทำครั้งเดียว)
 logger.info(f"Loading YOLO model from '{MODEL_PATH}' ...")
@@ -334,12 +339,17 @@ def health():
 
 @app.post("/detect")
 async def detect(file: UploadFile = File(...)):
-    image_bytes = await file.read()
+    image_bytes = await file.read(MAX_FILE_BYTES + 1)
+    if len(image_bytes) > MAX_FILE_BYTES:
+        raise HTTPException(status_code=413, detail="image must be no larger than 10 MB")
     if not image_bytes:
         raise HTTPException(status_code=400, detail="empty file")
 
     try:
-        img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        source = Image.open(io.BytesIO(image_bytes))
+        if source.width * source.height > MAX_IMAGE_PIXELS:
+            raise ValueError("image exceeds 40 megapixels")
+        img = source.convert("RGB")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"invalid image: {e}")
 

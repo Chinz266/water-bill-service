@@ -1,3 +1,4 @@
+import { InputValue } from '../security/input-value';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 /**
@@ -9,9 +10,11 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
  */
 export class ScanBatchDto {
   @ApiProperty({ description: 'บิลประจำเดือนที่จะออก (01-12)', example: '08' })
+  @InputValue('text', { maxLength: 1000 })
   billing_month!: string;
 
   @ApiProperty({ description: 'บิลประจำปี (ค.ศ.)', example: '2026' })
+  @InputValue('text', { maxLength: 1000 })
   billing_year!: string;
 
   @ApiPropertyOptional({
@@ -20,5 +23,6 @@ export class ScanBatchDto {
       'ไม่ส่งมาจะเทียบกับบ้านทุกหลังในระบบ ซึ่งเพิ่มโอกาสจับคู่ผิดโดยไม่จำเป็น',
     example: 1,
   })
+  @InputValue('integer', { min: 0, max: 2147483647 })
   villages_id?: number;
 }

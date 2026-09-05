@@ -5,7 +5,7 @@
 ```
 ┌─────────────────────┐
 │  Angular  :4200     │   หน้าเว็บ (อยู่คนละ repo)
-│  water-bill-web     │   ../../WaterWeb/water-bill-web
+│  water-bill-web     │   ../water-bill-web
 └──────────┬──────────┘
            │ HTTP + JSON
            ▼
@@ -23,9 +23,9 @@
 
 | ส่วน           | โฟลเดอร์                            | พอร์ต | ภาษา                                   |
 | -------------- | ----------------------------------- | ----- | -------------------------------------- |
-| หน้าเว็บ       | `WaterWeb/water-bill-web`           | 4200  | Angular 21 (standalone, zoneless, SSR) |
-| Backend        | `WaterService/water-bill-service`   | 3000  | NestJS + TypeORM                       |
-| Vision service | `WaterService/meter-vision-service` | 8000  | Python 3.12 + FastAPI + Ultralytics    |
+| หน้าเว็บ       | `../water-bill-web`           | 4200  | Angular 21 (standalone, zoneless) |
+| Backend        | `water-bill-service`   | 3000  | NestJS + TypeORM                       |
+| Vision service | `meter-vision-service` | 8000  | Python 3.12 + FastAPI + Ultralytics    |
 | ฐานข้อมูล      | XAMPP                               | 3306  | MySQL / MariaDB                        |
 
 ---
@@ -62,7 +62,7 @@ npm run start:dev
 **3. หน้าเว็บ**
 
 ```powershell
-cd ..\..\WaterWeb\water-bill-web
+cd ..\water-bill-web
 ng serve
 ```
 
@@ -90,7 +90,9 @@ ng serve
 | คำสั่ง               | ทำอะไร                                                |
 | -------------------- | ----------------------------------------------------- |
 | `npm run start:dev`  | รัน API + vision service พร้อม watch                  |
-| `npm test`           | unit test (ปัจจุบัน **206 เทสต์ ผ่านทั้งหมด**)         |
+| `npm test`           | unit test (ปัจจุบัน **214 เทสต์ ผ่านทั้งหมด**)         |
+| `npm run test:database` | สำรองและกู้ลงฐานทดสอบใหม่ แล้วทดสอบ API กับ MySQL จริง |
+| `npm run db:backup` | สำรองฐานข้อมูลและรูป พร้อม checksum |
 | `npm run test:watch` | รันเทสต์ค้างไว้ แก้โค้ดแล้วรันซ้ำให้เอง               |
 | `npm run seed:admin` | เติมคอลัมน์ที่ตาราง `admin` ขาด + สร้างแอดมินเริ่มต้น |
 | `npm run free-ports` | เคลียร์พอร์ต 3000 / 8000 ที่ค้างอยู่                  |

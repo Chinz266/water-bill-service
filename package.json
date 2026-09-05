@@ -25,7 +25,10 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "seed:admin": "ts-node src/seed/seed-admin.ts"
+    "seed:admin": "ts-node src/seed/seed-admin.ts",
+    "db:backup": "ts-node -T scripts/backup.ts create",
+    "db:restore": "ts-node -T scripts/backup.ts restore",
+    "test:database": "ts-node -T -r tsconfig-paths/register scripts/test-database.ts"
   },
   "dependencies": {
     "@nestjs/axios": "^4.0.1",

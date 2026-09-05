@@ -1,3 +1,4 @@
+import { imageUploadOptions, validateImage } from '../security/upload';
 import {
   Controller,
   Get,
@@ -76,13 +77,14 @@ export class MeterReadingsController {
       },
     },
   })
-  @UseInterceptors(FileInterceptor('file')) // รับไฟล์จาก Key ที่ชื่อว่า 'file'
+  @UseInterceptors(FileInterceptor('file', imageUploadOptions)) // รับไฟล์จาก Key ที่ชื่อว่า 'file'
   async uploadForOcr(@UploadedFile() file: Express.Multer.File) {
     if (!file) {
       throw new BadRequestException('กรุณาแนบไฟล์รูปภาพมาด้วย');
     }
 
     // โยน Buffer ของไฟล์ที่ได้รับ ไปให้ Service จัดการ
+    await validateImage(file);
     return await this.meterReadingsService.extractMeterUnit(file.buffer);
   }
 }

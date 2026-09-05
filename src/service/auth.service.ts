@@ -140,7 +140,9 @@ export class AuthService {
     const passwordHash = await bcrypt.hash(data.password, SALT_ROUNDS);
 
     const admin = this.adminRepository.create({
-      ...data,
+      fname: data.fname,
+      lname: data.lname,
+      email: data.email,
       password: passwordHash,
       createDate: new Date(),
     });

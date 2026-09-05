@@ -1,4 +1,9 @@
-import { Injectable, BadRequestException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  Logger,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { HttpService } from '@nestjs/axios';
@@ -242,12 +247,20 @@ export class MeterReadingsService {
     } catch (error) {
       // แยกกรณีต่อ Python service ไม่ติด ออกจาก error อื่นๆ เพื่อ debug ง่าย
       const err = error as { code?: string; message?: string; stack?: string };
-      if (err.code === 'ECONNREFUSED' || err.code === 'ETIMEDOUT') {
+      if (
+        [
+          'ECONNREFUSED',
+          'ETIMEDOUT',
+          'ECONNABORTED',
+          'ENOTFOUND',
+          'EAI_AGAIN',
+        ].includes(err.code ?? '')
+      ) {
         this.logger.error(
           `ไม่สามารถเชื่อมต่อ Vision service ที่ ${this.visionServiceUrl} ได้ ` +
             `(ตรวจสอบว่ารัน Python service อยู่หรือไม่): ${err.message}`,
         );
-        throw new BadRequestException(
+        throw new ServiceUnavailableException(
           'ระบบอ่านมิเตอร์ยังไม่พร้อมใช้งาน กรุณาลองใหม่อีกครั้ง',
         );
       }

@@ -1,0 +1,21 @@
+{
+  "completedAt": "2026-09-05T18:34:11.617Z",
+  "passed": true,
+  "checks": [
+    "Backup SHA-256 and restored row counts match for every table",
+    "Restored image bytes match (synthetic fixture kept separate from real backup)",
+    "Actual password login and JWT authorization",
+    "Registration cannot elevate role through extra JSON fields",
+    "Create reading + bill, exact amount and retry after lost response without duplication",
+    "Rejected duplicate leaves no orphan meter reading",
+    "Resident sees only linked household and cannot read other bills or accept payment",
+    "Staff cannot edit historical overdue bills",
+    "Payment is persisted and a paid bill cannot be overwritten",
+    "Real database readiness; vision available",
+    "AI outage returns controlled errors and degraded readiness without stopping billing API"
+  ],
+  "sourceTables": 20,
+  "sourceUnchanged": true,
+  "testDatabaseRemoved": true,
+  "backup": "C:\\Users\\CHz\\Desktop\\water-bill\\water-bill-service\\backups\\2026-09-05T18-34-05-239Z-8b476f73"
+}

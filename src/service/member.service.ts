@@ -17,8 +17,6 @@ export class MemberService {
     private memberRepository: Repository<MemberEntity>,
     @InjectRepository(MeterReadingEntity)
     private meterReadingRepository: Repository<MeterReadingEntity>,
-    @InjectRepository(BillEntity)
-    private billRepository: Repository<BillEntity>,
     private readonly meterPhotoService: MeterPhotoService,
   ) {}
 
@@ -37,7 +35,7 @@ export class MemberService {
    * คอลัมน์เป็น decimal ที่มีที่ให้พอดีกับช่วงจริง (lat ±90, lng ±180)
    * ค่าที่เกินช่วง — พิมพ์ผิด หรือสลับ lat/lng กัน ซึ่งเกิดบ่อยมาก —
    * จะทำให้ MySQL โยน error 1264 ออกมาเป็น 500 ที่ผู้ใช้อ่านไม่รู้เรื่อง
-   * โปรเจกต์นี้ยังไม่ได้เปิด global ValidationPipe จึงต้องดักเองที่ชั้น service
+   * ตรวจซ้ำใน service เพื่อครอบคลุมการเรียกตรงและ DTO ที่ยังไม่มีกฎตรวจพิกัด
    */
   private assertCoordinates(
     latitude?: number | null,

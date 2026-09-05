@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Post } from '@nestjs/common';
+import { LoginRateLimitGuard } from '../security/login-rate-limit.guard';
+import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthService } from 'src/service/auth.service';
 import { AuthRegisterDto } from 'src/dto/auth-register.dto';
@@ -33,6 +34,7 @@ export class AuthController {
   }
 
   @Public()
+  @UseGuards(LoginRateLimitGuard)
   @Post('login')
   @ApiOperation({
     summary: 'เข้าสู่ระบบ (คืน access_token ไว้แนบกับ request ถัดไป)',
@@ -42,6 +44,7 @@ export class AuthController {
   }
 
   @Public()
+  @UseGuards(LoginRateLimitGuard)
   @Post('member/login')
   @ApiOperation({ summary: 'เข้าสู่ระบบลูกบ้านด้วยเบอร์โทร' })
   loginMember(@Body() data: MemberAuthDto) {

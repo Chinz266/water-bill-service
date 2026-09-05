@@ -3,7 +3,6 @@ import { Repository } from 'typeorm';
 import { MemberService } from './member.service';
 import { MemberEntity } from '../entity/member.entity';
 import { MeterReadingEntity } from '../entity/meter-reading.entity';
-import { BillEntity } from '../entity/bill.entity';
 import { CreateMemberDto } from '../dto/member-create.dto';
 import { RegisterMemberOnsiteDto } from '../dto/member-onsite.dto';
 import { MeterPhotoService } from './meter-photo.service';
@@ -56,7 +55,6 @@ describe('MemberService — ด่านตรวจพิกัด', () => {
     service = new MemberService(
       memberRepository as unknown as Repository<MemberEntity>,
       meterReadingRepository as unknown as Repository<MeterReadingEntity>,
-      {} as Repository<BillEntity>,
       photoService as unknown as MeterPhotoService,
     );
   });

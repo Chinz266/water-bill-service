@@ -1,3 +1,5 @@
+import { HealthController } from './controller/health.controller';
+import { LoginRateLimitGuard } from './security/login-rate-limit.guard';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { HttpModule } from '@nestjs/axios';
@@ -132,6 +134,7 @@ import { HousekeepingService } from './service/housekeeping.service';
     ]),
   ],
   controllers: [
+    HealthController,
     AdminController,
     MemberController,
     WaterRatesController,
@@ -148,6 +151,7 @@ import { HousekeepingService } from './service/housekeeping.service';
     AuditController,
   ],
   providers: [
+    LoginRateLimitGuard,
     AdminService,
     MemberService,
     WaterRatesService,

@@ -1,3 +1,4 @@
+import { imageUploadOptions, validateImage } from '../security/upload';
 import {
   BadRequestException,
   Controller,
@@ -111,11 +112,14 @@ export class BillsController {
       },
     },
   })
-  @UseInterceptors(FilesInterceptor('files', ScanBatchService.MAX_FILES))
+  @UseInterceptors(
+    FilesInterceptor('files', ScanBatchService.MAX_FILES, imageUploadOptions),
+  )
   async scanBatch(
     @UploadedFiles() files: Express.Multer.File[],
     @Body() dto: ScanBatchDto,
   ) {
+    for (const file of files ?? []) await validateImage(file);
     return await this.scanBatchService.analyze(files, dto);
   }
 
@@ -233,13 +237,14 @@ export class BillsController {
       'แก้สำเร็จแล้วให้โหลดประวัติบิลใหม่ทั้งชุด เพราะยอดค้างที่ใบอื่นทบใบนี้ไว้เปลี่ยนตามไปด้วย',
   })
   @ApiConsumes('multipart/form-data')
-  @UseInterceptors(FileInterceptor('photo'))
+  @UseInterceptors(FileInterceptor('photo', imageUploadOptions))
   async updateReading(
     @Param('id') id: string,
     @Body() dto: UpdateReadingDto,
     @CurrentUser() user: JwtPayload,
     @UploadedFile() photo?: Express.Multer.File,
   ) {
+    if (photo) await validateImage(photo);
     return await this.billsService.updateReading(
       +id,
       {
