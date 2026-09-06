@@ -48,14 +48,12 @@ export class MemberService {
     }
 
     // 1. สร้าง Instance ของ Entity ก่อน
-    // 🌟 คอลัมน์จริงใน DB สะกดว่า craete_by (ไม่ใช่ create_by) และห้ามเป็น NULL
-    //    ถ้าไม่ map ตรงนี้ ค่าจะหล่นหายแล้ว MySQL จะโยน 500 ออกมา
     const { create_by, ...memberData } = userData;
     const memberToSave = this.memberRepository.create({
       ...memberData,
       house_no: memberData.house_no?.trim(),
-      craete_by: create_by,
-      craeta_date: new Date(),
+      create_by,
+      create_date: new Date(),
     });
     // 2. แล้วค่อยบันทึก
     newMember = await this.memberRepository.save(memberToSave);

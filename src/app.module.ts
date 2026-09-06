@@ -13,6 +13,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AdminEntity } from './entity/admin.entity';
 import { MemberEntity } from './entity/member.entity';
 import { AccountMemberEntity } from './entity/account-member.entity';
+import { AccountEntity } from './entity/account.entity';
 import { MemberController } from './controller/member.controller';
 import { MemberService } from './service/member.service';
 import { WaterRatesController } from './controller/water-rates.controller';
@@ -82,6 +83,7 @@ import {
       AdminEntity,
       MemberEntity,
       AccountMemberEntity,
+      AccountEntity,
       WaterRateEntity,
       VillageEntity,
       MeterReadingEntity,

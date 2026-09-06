@@ -159,7 +159,7 @@ async function main(): Promise<void> {
     email,
     // เก็บเฉพาะ hash ไม่เก็บรหัสจริง
     password: await bcrypt.hash(password, SALT_ROUNDS),
-    role: 'admin',
+    adminRole: 'owner',
     createDate: new Date(),
   });
 

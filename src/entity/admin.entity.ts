@@ -24,8 +24,14 @@ export class AdminEntity {
   @Column({ type: 'varchar', length: 255, nullable: true })
   password!: string;
 
-  @Column({ type: 'varchar', length: 45, nullable: true })
-  role!: string;
+  // ระดับสิทธิ์ภายในฝั่งผู้ดูแล ส่วนสิทธิ์หลักใน JWT จะเป็น `admin`
+  @Column({
+    type: 'enum',
+    enum: ['owner', 'staff'],
+    name: 'admin_role',
+    default: 'staff',
+  })
+  adminRole!: 'owner' | 'staff';
 
   // 🌟 รูปโปรไฟล์ผู้ดูแล เก็บเป็น base64 data URL (ย่อขนาดจากฝั่งเว็บก่อนแล้ว)
   //    MEDIUMTEXT เพราะ varchar สั้นเกินเก็บ base64 ไม่พอ

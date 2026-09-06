@@ -94,7 +94,6 @@ export class MemberPortalService {
   // ส่งเฉพาะชื่อกับเบอร์ ไม่แตะอีเมล/รหัสผ่าน — /admin/all เป็นสิทธิ์ admin ลูกบ้านเรียกเองไม่ได้
   async getAdminContacts() {
     const admins = await this.memberRepository.manager.find(AdminEntity, {
-      where: { role: 'admin' },
       select: { id: true, fname: true, lname: true, phone: true, photo: true },
       order: { id: 'ASC' },
     });

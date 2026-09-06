@@ -10,21 +10,25 @@ import * as bcrypt from 'bcryptjs';
 import { AdminEntity } from 'src/entity/admin.entity';
 import { MemberEntity } from 'src/entity/member.entity';
 import { AccountMemberEntity } from 'src/entity/account-member.entity';
+import { AccountEntity } from 'src/entity/account.entity';
 import { AuthRegisterDto } from 'src/dto/auth-register.dto';
 import { AuthLoginDto } from 'src/dto/auth-login.dto';
 import { MemberAuthDto } from 'src/dto/member-auth.dto';
-import { JwtPayload, UserRole } from 'src/auth/auth.constants';
+import { JwtPayload } from 'src/auth/auth.constants';
 
 /** จำนวนรอบการ hash — 10 เป็นค่ามาตรฐานที่สมดุลระหว่างความปลอดภัยกับความเร็ว */
 const SALT_ROUNDS = 10;
 
 /** ข้อมูลผู้ใช้ที่ส่งกลับหน้าบ้านได้ (ตัด password ออกแล้ว) */
-type SafeAdmin = Omit<AdminEntity, 'password'>;
+type SafeAdmin = Omit<AdminEntity, 'password'> & { role: 'admin' };
+type SafeMember = Pick<AccountEntity, 'id' | 'phone' | 'createDate'> & {
+  role: 'member';
+};
 
 /** รูปแบบที่ login/register คืนกลับ — หน้าบ้านเก็บ access_token ไว้แนบกับ request ถัดไป */
 export interface AuthResult {
   access_token: string;
-  user: SafeAdmin;
+  user: SafeAdmin | SafeMember;
 }
 
 @Injectable()
@@ -36,6 +40,8 @@ export class AuthService {
     private memberRepository: Repository<MemberEntity>,
     @InjectRepository(AccountMemberEntity)
     private accountMemberRepository: Repository<AccountMemberEntity>,
+    @InjectRepository(AccountEntity)
+    private accountRepository: Repository<AccountEntity>,
     private readonly jwtService: JwtService,
   ) {}
 
@@ -45,7 +51,7 @@ export class AuthService {
    */
   private toSafeAdmin(admin: AdminEntity): SafeAdmin {
     const { password: _password, ...safe } = admin;
-    return safe;
+    return { ...safe, role: 'admin' };
   }
 
   /** สร้าง token จากข้อมูลบัญชี — ใช้ร่วมกันทั้ง login และ register */
@@ -53,7 +59,7 @@ export class AuthService {
     const payload: JwtPayload = {
       sub: admin.id,
       email: admin.email,
-      role: (admin.role as UserRole) ?? 'admin',
+      role: 'admin',
     };
     return {
       access_token: await this.jwtService.signAsync(payload),
@@ -82,7 +88,7 @@ export class AuthService {
     const admin = this.adminRepository.create({
       ...data,
       password: passwordHash,
-      role: 'admin',
+      adminRole: 'staff',
       createDate: new Date(),
     });
     const saved = await this.adminRepository.save(admin);
@@ -146,18 +152,11 @@ export class AuthService {
       );
     }
 
-    // มีบัญชีอยู่แล้วใช้ตัวเดิม ไม่มีก็เปิดให้เลย (ไม่มีรหัสผ่าน — คอลัมน์ password ปล่อย NULL)
-    let account = await this.adminRepository.findOneBy({
-      phone,
-      role: 'member',
-    });
+    // มีบัญชีอยู่แล้วใช้ตัวเดิม ไม่มีก็เปิดบัญชีลูกบ้านในตาราง accounts
+    let account = await this.accountRepository.findOneBy({ phone });
     if (!account) {
-      account = await this.adminRepository.save(
-        this.adminRepository.create({
-          phone,
-          role: 'member',
-          createDate: new Date(),
-        }),
+      account = await this.accountRepository.save(
+        this.accountRepository.create({ phone }),
       );
     }
 
@@ -179,6 +178,14 @@ export class AuthService {
       await this.accountMemberRepository.save(missingLinks);
     }
 
-    return this.issueToken(account);
+    const payload: JwtPayload = {
+      sub: account.id,
+      email: null,
+      role: 'member',
+    };
+    return {
+      access_token: await this.jwtService.signAsync(payload),
+      user: { ...account, role: 'member' },
+    };
   }
 }

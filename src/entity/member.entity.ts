@@ -40,11 +40,11 @@ export class MemberEntity {
   @Column({ name: 'villages_id', type: 'int' })
   villages_id!: number;
 
-  @Column({ name: 'craeta_date', type: 'date' })
-  craeta_date!: Date;
+  @Column({ name: 'create_date', type: 'date' })
+  create_date!: Date;
 
-  @Column({ name: 'craete_by', type: 'int' })
-  craete_by!: number;
+  @Column({ name: 'create_by', type: 'int' })
+  create_by!: number;
 
   @Column({ name: 'modify_by', type: 'int', nullable: true })
   modify_by!: number;
