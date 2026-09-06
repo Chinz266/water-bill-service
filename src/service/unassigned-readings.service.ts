@@ -483,7 +483,6 @@ export class UnassignedReadingsService {
       confirm_meter_reset: dto.confirm_meter_reset,
       confirm_digit_change: dto.confirm_digit_change,
       confirm_low_confidence: dto.confirm_low_confidence,
-      confirm_duplicate_location: dto.confirm_duplicate_location,
       confirm_stale_photo: dto.confirm_stale_photo,
     });
 

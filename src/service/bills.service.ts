@@ -87,8 +87,6 @@ export const BILL_ERROR_CODES = {
   DIGIT_CHANGE: 'DIGIT_CHANGE',
   /** OCR อ่านไม่ชัด → `confirm_low_confidence` */
   LOW_CONFIDENCE: 'LOW_CONFIDENCE',
-  /** พิกัดซ้ำเป๊ะทุกทศนิยม → `confirm_duplicate_location` */
-  DUPLICATE_LOCATION: 'DUPLICATE_LOCATION',
   /** รูปถ่ายไว้นานเกิน 30 วัน → `confirm_stale_photo` */
   STALE_PHOTO: 'STALE_PHOTO',
   /** เลขต่ำกว่าเดือนก่อน → `confirm_meter_reset` */
@@ -418,11 +416,45 @@ export class BillsService {
   > {
     const byMember = new Map<number, { lat: number[]; lng: number[] }>();
 
+    // ═══ รอบแรก: มิเตอร์ตัวไหนคือตัวที่ใช้อยู่ของแต่ละบ้าน ═══
+    //
+    // readings เรียงจากเก่าไปใหม่ ค่าที่ทับไปเรื่อย ๆ จึงเหลือ meters_id ล่าสุดที่รู้
+    // ต้องรู้ก่อนเริ่มเก็บพิกัด เพราะการจดของมิเตอร์ตัวที่ถอดไปแล้วชี้ไปคนละจุด
+    const activeMeterOf = new Map<number, number>();
+    for (const r of readings) {
+      if (r.meters_id === null || r.meters_id === undefined) continue;
+      activeMeterOf.set(r.members_id, Number(r.meters_id));
+    }
+
     for (const r of readings) {
       const latitude = Number(r.latitude);
       const longitude = Number(r.longitude);
       if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) continue;
       if (latitude === 0 && longitude === 0) continue;
+
+      // ═══ ตัดการจดของมิเตอร์ตัวที่ถอดไปแล้วทิ้ง ═══
+      //
+      // มิเตอร์ที่ถูกย้ายจุดตอนเปลี่ยนตัว ทำให้พิกัดจริงขยับไปด้วย แต่ median
+      // จะยอมขยับตามก็ต่อเมื่อจุดใหม่มีมากกว่าครึ่งของทั้งหมด — บ้านที่จดมาแล้ว
+      // 24 ครั้งจึงต้องจดที่จุดใหม่อีก 25 ครั้ง (สองปี) กว่าระบบจะยอมรับว่ามันย้าย
+      // ระหว่างนั้นระยะที่คำนวณได้ผิดทุกเดือน แล้วไปโผล่เป็นคำเตือน "ถ่ายไกลจากบ้าน"
+      //
+      // ตัดด้วย meters_id ไม่ใช่ตัดด้วยช่วงเวลา เพราะพิกัดมิเตอร์ไม่ได้เปลี่ยนตามเวลา
+      // มันเปลี่ยนตอนมีคนไปย้ายมันเท่านั้น — หน้าต่างเวลาจะทิ้งตัวอย่างของมิเตอร์
+      // ตัวเดิมที่ยังใช้ได้ดีไปฟรี ๆ (n น้อยลง = median แกว่งขึ้นตาม 1.25σ/√n)
+      //
+      // ⚠️ แถวที่ meters_id เป็น NULL **เก็บไว้** — NULL แปลว่า "ไม่รู้ว่าตัวไหน"
+      //    (การจดก่อนมีทะเบียนมิเตอร์) ไม่ใช่ "คนละตัว" ตัดทิ้งจะเสียตัวอย่าง
+      //    ของบ้านที่ไม่เคยเปลี่ยนมิเตอร์เลยทั้งที่ข้อมูลยังใช้ได้
+      const activeMeterId = activeMeterOf.get(r.members_id);
+      if (
+        activeMeterId !== undefined &&
+        r.meters_id !== null &&
+        r.meters_id !== undefined &&
+        Number(r.meters_id) !== activeMeterId
+      ) {
+        continue;
+      }
 
       const bucket = byMember.get(r.members_id) ?? { lat: [], lng: [] };
       bucket.lat.push(latitude);
@@ -1281,7 +1313,7 @@ export class BillsService {
   }
 
   /**
-   * กันรูปเก่า/รูปใช้ซ้ำ — ตรวจสองชั้นจากข้อมูลที่มีอยู่แล้วในตาราง
+   * กันรูปเก่า/รูปใช้ซ้ำ — ตรวจจากเวลาถ่ายที่อยู่ใน EXIF
    *
    * ═══ ชั้นที่ 1: captured_at ซ้ำเป๊ะ = ไฟล์เดียวกันแน่นอน ═══
    *
@@ -1289,14 +1321,10 @@ export class BillsService {
    * ถ้าตรงกับแถวที่มีอยู่แล้ว แปลว่าเป็นไฟล์เดิมถูกอัปซ้ำ — **บล็อกตาย ไม่มีปุ่มยืนยัน**
    * เพราะไม่มีสถานการณ์ที่ถูกต้องเลยที่จะเกิดเหตุการณ์นี้
    *
-   * ═══ ชั้นที่ 2: พิกัดตรงกันทุกทศนิยม = น่าสงสัยแต่ไม่ฟันธง ═══
-   *
-   * GPS จริงไม่เคยให้ค่าเดิมเป๊ะทุกทศนิยมสองครั้ง (decimal(10,8) = ละเอียดระดับ 1 มม.)
-   * ถ้าเจอ แปลว่าค่านั้นถูกคัดลอกมา ไม่ได้วัดใหม่ — แต่เปิดปุ่มยืนยันไว้
-   * เผื่อหน้าเว็บ cache พิกัดไว้แล้วส่งค่าเดิมมาโดยที่คนถ่ายรูปใหม่จริง
-   *
-   * ตรวจข้ามทุกบ้าน ไม่ใช่แค่บ้านหลังนี้ — รูปที่ถูกยกไปใช้เป็นหลักฐานของบ้านอื่น
-   * คือเคสที่อันตรายกว่ารูปซ้ำของบ้านตัวเอง
+   * ไม่มีด่านที่ดูพิกัดซ้ำเป๊ะทุกทศนิยมแล้ว — GPS มือถือให้ค่าเดิมซ้ำได้จริง
+   * (มิเตอร์ห่างกันไม่กี่สิบเซนติเมตร หรือยืนจุดเดิมตอนกลับมาจดรอบถัดไป)
+   * ด่านนั้นจึงฟ้องคนที่ทำถูกบ่อยกว่าจับคนที่คัดลอกพิกัด ตัวที่ใช้ตัดสินแทนคือ
+   * captured_at ซ้ำ (ชั้นที่ 1), ถ่ายรัวจุดเดิม (ชั้นที่ 1.5) และการเทียบตัวเลขบนหน้าปัด
    */
   private async assertPhotoNotReused(params: {
     membersId: number;
@@ -1304,7 +1332,6 @@ export class BillsService {
     longitude: number | null;
     captured_at: Date | null;
     excludeReadingId?: number;
-    confirm_duplicate_location?: boolean;
   }): Promise<void> {
     const { latitude, longitude, captured_at } = params;
 
@@ -1393,36 +1420,6 @@ export class BillsService {
           ),
         );
       }
-    }
-
-    if (
-      latitude === null ||
-      longitude === null ||
-      params.confirm_duplicate_location
-    ) {
-      return;
-    }
-
-    // GPS มือถือให้ค่าเดิมเป๊ะสองครั้งได้จริง เมื่อมิเตอร์สองตัวห่างกัน 30 ซม.
-    // (ต่ำกว่าความละเอียดที่เครื่องแยกออกหลายเท่า) — ในกลุ่มเดียวกันจึงไม่ใช่สัญญาณ
-    // ของการคัดลอกพิกัดอีกต่อไป ต้องมองข้ามเฉพาะคู่ที่อยู่กลุ่มเดียวกันเท่านั้น
-    // ส่วนพิกัดที่ไปซ้ำกับบ้านนอกกลุ่มยังเป็นเรื่องผิดปกติเหมือนเดิม
-    const mates = [...(await this.clusterMemberIds(params.membersId))].filter(
-      (id) => id !== params.membersId,
-    );
-    const samePlace = await this.meterReadingRepository.findOne({
-      where: mates.length
-        ? { latitude, longitude, members_id: Not(In(mates)) }
-        : { latitude, longitude },
-    });
-    if (samePlace && samePlace.id !== params.excludeReadingId) {
-      const owner =
-        samePlace.members_id === params.membersId
-          ? 'บ้านหลังเดียวกัน'
-          : `บ้านอีกหลัง (รหัส ${samePlace.members_id})`;
-      throw new ConflictException(
-        `พิกัดที่ส่งมาตรงกับการจดมิเตอร์ของ${owner}แบบเป๊ะทุกทศนิยม ซึ่ง GPS จริงไม่เคยให้ค่าเดิมซ้ำสองครั้ง — มักแปลว่าพิกัดถูกคัดลอกมา ไม่ได้วัดใหม่ตอนยืนหน้ามิเตอร์ กรุณากดวัดพิกัดใหม่ ถ้ายืนยันว่าถ่ายใหม่จริงให้กดยืนยันครับ`,
-      );
     }
   }
 
@@ -2074,13 +2071,6 @@ export class BillsService {
       ...prep.flags,
       ...this.assertCapturedAtSane(location.captured_at),
     ];
-    if (dto.confirm_duplicate_location) {
-      flags.push({
-        flag_type: 'duplicate_location',
-        detail: `พิกัด ${location.latitude ?? '-'}, ${location.longitude ?? '-'} ซ้ำกับการจดที่มีอยู่ — กดยืนยันผ่าน`,
-        confirmed_by: dto.create_by ?? null,
-      });
-    }
     if (dto.confirm_stale_photo) {
       flags.push({
         flag_type: 'stale_photo',
@@ -2110,7 +2100,6 @@ export class BillsService {
       captured_at: location.captured_at,
       // ตอนกดจดทับ การจดของเดือนเดิมยังอยู่ในตาราง ถ้าไม่ตัดออกจะฟ้องว่าซ้ำกับตัวเอง
       excludeReadingId: prep.existing?.meter_readings_id,
-      confirm_duplicate_location: dto.confirm_duplicate_location,
     });
 
     // เขียนไฟล์รูปก่อนเข้าทรานแซกชัน — การเขียนดิสก์ย้อนกลับพร้อม rollback ไม่ได้

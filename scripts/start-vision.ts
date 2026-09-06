@@ -64,13 +64,13 @@ function bootstrapVenv(): string | undefined {
 
   if (!systemPython) {
     console.warn('');
-    console.warn(
-      '⚠️  ไม่พบ Python ในเครื่อง — ข้ามการสตาร์ท vision service',
-    );
+    console.warn('⚠️  ไม่พบ Python ในเครื่อง — ข้ามการสตาร์ท vision service');
     console.warn(
       '   (NestJS จะรันต่อได้ตามปกติ แต่หน้าสแกนมิเตอร์จะใช้งานไม่ได้)',
     );
-    console.warn('   ติดตั้ง Python 3 ก่อนที่ https://www.python.org/downloads/');
+    console.warn(
+      '   ติดตั้ง Python 3 ก่อนที่ https://www.python.org/downloads/',
+    );
     return undefined;
   }
 

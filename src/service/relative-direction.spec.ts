@@ -7,8 +7,12 @@ import { RelativeDirectionUtil } from './relative-direction';
  *
  * สูตรจะถูกแค่ไหนก็ไม่ช่วย ถ้าคนที่เอาไปใช้เข้าใจผิดว่าตัวเลขนี้เชื่อได้ที่ระยะ 30 ซม.
  * GPS มือถือคลาดเคลื่อน 3-30 ม. ทิศที่คำนวณจากระยะระดับเซนติเมตรจึงเป็นเสียงรบกวน
- * เทสต์ครึ่งหลังจึงล็อกว่า `reliable` ต้องเป็น false ทุกครั้งที่ระยะต่ำกว่าพื้นเสียงรบกวน
- * และตัวที่เชื่อได้จริงคือ `sequence_index` ซึ่งไม่ได้มาจากเซนเซอร์
+ * เทสต์ครึ่งหลังจึงล็อกว่า `reliable` ต้องเป็น false ทุกครั้งที่ระยะต่ำกว่าเกณฑ์
+ * `DIRECTION_TRUST_M` และตัวที่เชื่อได้จริงคือ `sequence_index` ซึ่งไม่ได้มาจากเซนเซอร์
+ *
+ * ⚠️ เกณฑ์ปัจจุบันคือ 10 ม. ซึ่งเป็นค่าที่เจ้าของระบบเลือกเอง ไม่ใช่ค่าที่ข้อมูลชี้ (20 ม.)
+ *    เทสต์ชุดนี้ล็อกแค่ว่าธงทำงานตามเกณฑ์ที่ตั้งไว้ ไม่ได้แปลว่าทิศที่ได้ตรงเกณฑ์พอดี
+ *    แม่นพอจะเอาไปตัดสินว่าเป็นบ้านไหน
  */
 
 /** จุดอ้างอิงกลางหมู่บ้าน (โคราช) */
@@ -89,23 +93,47 @@ describe('RelativeDirectionUtil — ระยะและทิศทาง', ()
     });
   });
 
-  describe('เกณฑ์ 0.3 เมตร', () => {
-    it('ระยะ ≤ 0.3 ม. เข้าเกณฑ์ "อาจเป็นมิเตอร์คนละตัวบนกำแพงเดียวกัน"', () => {
+  /**
+   * เขตที่ถือว่า "GPS แยกมิเตอร์ไม่ออก" — กว้าง 10 ม. ไม่ใช่ 30 ซม.
+   *
+   * ธงนี้ดูระยะ **ที่วัดได้** ไม่ใช่ระยะจริง เกณฑ์จึงต้องกว้างเท่าความคลาดของเครื่อง
+   * (3-10 ม. ที่โล่ง, 10-30 ม. ใต้ชายคา) ไม่ใช่เท่าระยะห่างจริงของมิเตอร์บนกำแพง
+   */
+  describe('เขตที่ GPS แยกไม่ออก (10 เมตร)', () => {
+    it('ระยะสั้นกว่าเกณฑ์ เข้าข่าย "อาจเป็นมิเตอร์คนละตัวที่ GPS แยกไม่ออก"', () => {
       expect(
         RelativeDirectionUtil.compare(BASE, offset(0, 0.25))?.within_threshold,
       ).toBe(true);
+      // ระยะที่ GPS มือถือคลาดได้ตามปกติ — ต้องอยู่ในเขตนี้ ไม่ใช่หลุดออกไป
       expect(
-        RelativeDirectionUtil.compare(BASE, offset(0, 0.3))?.within_threshold,
+        RelativeDirectionUtil.compare(BASE, offset(0, 5))?.within_threshold,
+      ).toBe(true);
+      expect(
+        RelativeDirectionUtil.compare(BASE, offset(0, 8))?.within_threshold,
       ).toBe(true);
     });
 
-    it('ระยะ > 0.3 ม. ถือเป็นคนละจุดตามปกติ', () => {
-      expect(
-        RelativeDirectionUtil.compare(BASE, offset(0, 0.4))?.within_threshold,
-      ).toBe(false);
+    it('ระยะ > 10 ม. ถือเป็นคนละจุดจริง ๆ พ้นเขตที่ GPS แยกไม่ออก', () => {
       expect(
         RelativeDirectionUtil.compare(BASE, offset(0, 12))?.within_threshold,
       ).toBe(false);
+      expect(
+        RelativeDirectionUtil.compare(BASE, offset(0, 40))?.within_threshold,
+      ).toBe(false);
+    });
+
+    /**
+     * ธงนี้กับ `reliable` ตั้งอยู่บนเส้นเดียวกัน (THRESHOLD_M = DIRECTION_TRUST_M)
+     * ต้องเป็นคนละด้านของเส้นเสมอ ไม่งั้นจะมีช่วงที่บอกว่าทั้งแยกไม่ออกและเชื่อทิศได้
+     */
+    it('ต่ำกว่าเส้น = แยกไม่ออก · เหนือเส้น = เชื่อทิศได้ ไม่มีช่วงที่ขัดกันเอง', () => {
+      const inside = RelativeDirectionUtil.compare(BASE, offset(0, 8));
+      const outside = RelativeDirectionUtil.compare(BASE, offset(0, 12));
+
+      expect(inside?.within_threshold).toBe(true);
+      expect(inside?.reliable).toBe(false);
+      expect(outside?.within_threshold).toBe(false);
+      expect(outside?.reliable).toBe(true);
     });
   });
 
@@ -120,8 +148,23 @@ describe('RelativeDirectionUtil — ระยะและทิศทาง', ()
       expect(near?.reliable).toBe(false);
     });
 
-    it('ระยะเกินพื้นเสียงรบกวน (≥ 3 ม.) → เชื่อทิศได้', () => {
+    it('ระยะ 8 ม. ยังไม่ถึงเกณฑ์ 10 ม. → reliable เป็น false', () => {
+      // เขตที่ GPS บอกซ้าย/ขวาไม่ได้ครอบถึง 10 ม. ต่ำกว่านั้นทิศเป็นเสียงรบกวน
+      expect(RelativeDirectionUtil.compare(BASE, offset(0, 8))?.reliable).toBe(
+        false,
+      );
+    });
+
+    it('ระยะ ≥ 10 ม. → ติดธง reliable ตามเกณฑ์ที่เจ้าของระบบเลือกไว้', () => {
+      // ⚠️ 10 ม. เป็นค่าที่เลือกเอง ไม่ใช่ค่าที่ตารางชี้ (ตารางชี้ 20 ม.) ที่ 12 ม. ทิศถูก 86.6%
+      // ห้ามเอาไปตัดสินว่าเป็นบ้านไหน — ตัวที่ตอบได้คือ sequence_index
       expect(RelativeDirectionUtil.compare(BASE, offset(0, 12))?.reliable).toBe(
+        true,
+      );
+    });
+
+    it('ระยะ ≥ 20 ม. → เชื่อทิศได้จริง (วัดมาแล้วถูก 98.7% ขึ้นไป)', () => {
+      expect(RelativeDirectionUtil.compare(BASE, offset(0, 25))?.reliable).toBe(
         true,
       );
     });

@@ -153,9 +153,6 @@ export class AssignUnassignedDto {
   @ApiPropertyOptional({ description: 'ยืนยันเลขที่ OCR อ่านได้ไม่ชัด' })
   confirm_low_confidence?: boolean;
 
-  @ApiPropertyOptional({ description: 'ยืนยันพิกัดที่ซ้ำกับการจดครั้งก่อน' })
-  confirm_duplicate_location?: boolean;
-
   @ApiPropertyOptional({ description: 'ยืนยันรูปที่ถ่ายไว้นานเกิน 30 วัน' })
   confirm_stale_photo?: boolean;
 }

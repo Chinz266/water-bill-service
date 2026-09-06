@@ -63,11 +63,110 @@ export class MemberService {
     check(longitude, 'ลองจิจูด', 180);
   }
 
+  /**
+   * ตรวจ "กลุ่มมิเตอร์ + ตำแหน่งในกลุ่ม" ก่อนลงฐานข้อมูล
+   *
+   * ═══ ทำไมต้องดักที่ชั้นนี้ ═══
+   *
+   * DB มี UNIQUE (cluster_group_id, sequence_index) กันตำแหน่งซ้ำอยู่แล้ว แต่มันเด้ง
+   * ออกมาเป็น ER_DUP_ENTRY ที่กลายเป็น 500 บนหน้าจอ ซึ่งคนกรอกอ่านไม่รู้เรื่องและ
+   * ไม่รู้ว่าไปชนกับบ้านหลังไหน — ต้องบอกให้ตรงว่าตำแหน่งนั้นเป็นของใครอยู่
+   *
+   * ═══ ทำไมต้องกรอกครบคู่ ═══
+   *
+   * มีกลุ่มแต่ไม่มีตำแหน่ง = อยู่ในกลุ่มที่ GPS แยกไม่ออก แล้วไม่มีอะไรมาแทน
+   * ซึ่งแย่กว่าไม่ประกาศกลุ่มเลย เพราะ ScanBatchService จะปิดการใช้พิกัดให้ทันที
+   * ที่เห็น cluster_group_id แล้วบอกให้ "ไล่จดตามลำดับ" ที่ไม่มีอยู่จริง
+   *
+   * มีตำแหน่งแต่ไม่มีกลุ่ม = ตัวเลขที่ไม่มีความหมาย ไม่มีใครอ่าน
+   */
+  /**
+   * แปลงค่าที่หน้าเว็บส่งมาให้เป็นรูปที่ฐานข้อมูลต้องการ
+   *
+   * ช่องว่างจากฟอร์มมาเป็น `''` ไม่ใช่ `null` ซึ่งเป็นคนละเรื่องกันในคอลัมน์นี้:
+   * `''` เป็นค่าที่มีจริง จึงไปติด UNIQUE (cluster_group_id, sequence_index) กับ
+   * บ้านเดี่ยวหลังอื่นที่ส่ง `''` มาเหมือนกัน ส่วน NULL ซ้ำกันได้ไม่จำกัดใน MySQL
+   */
+  private static normalizeCluster(
+    cluster_group_id: string | null | undefined,
+    sequence_index: number | null | undefined,
+  ): { cluster_group_id: string | null; sequence_index: number | null } {
+    const group =
+      typeof cluster_group_id === 'string' && cluster_group_id.trim() !== ''
+        ? cluster_group_id.trim()
+        : null;
+
+    // ไม่มีกลุ่ม = ตำแหน่งไม่มีความหมาย ล้างทิ้งพร้อมกันเสมอ
+    if (group === null) return { cluster_group_id: null, sequence_index: null };
+
+    const sequence = Number(sequence_index);
+    return {
+      cluster_group_id: group,
+      sequence_index:
+        Number.isInteger(sequence) && sequence > 0 ? sequence : null,
+    };
+  }
+
+  private async assertClusterPosition(
+    cluster_group_id: string | null | undefined,
+    sequence_index: number | null | undefined,
+    selfId?: number,
+  ): Promise<void> {
+    const group =
+      typeof cluster_group_id === 'string' && cluster_group_id.trim() !== ''
+        ? cluster_group_id.trim()
+        : null;
+
+    const hasSequence =
+      sequence_index !== null &&
+      sequence_index !== undefined &&
+      `${sequence_index}` !== '';
+    const sequence = hasSequence ? Number(sequence_index) : null;
+
+    if (group === null && sequence === null) return; // บ้านเดี่ยว — ปกติที่สุด
+
+    if (group === null) {
+      throw new UnprocessableEntityException(
+        'กรอกตำแหน่งในกลุ่มแล้วแต่ยังไม่ได้ระบุกลุ่มมิเตอร์ — ' +
+          'ตำแหน่งมีความหมายเฉพาะเมื่อรู้ว่าอยู่กลุ่มไหนครับ',
+      );
+    }
+
+    if (sequence === null) {
+      throw new UnprocessableEntityException(
+        `บ้านหลังนี้อยู่กลุ่มมิเตอร์ ${group} แต่ยังไม่ได้ระบุตำแหน่งในกลุ่ม — ` +
+          'มิเตอร์ที่ติดกันใช้พิกัดแยกไม่ได้ ระบบจึงต้องพึ่งลำดับตำแหน่งเท่านั้นครับ',
+      );
+    }
+
+    if (!Number.isInteger(sequence) || sequence < 1) {
+      throw new UnprocessableEntityException(
+        'ตำแหน่งในกลุ่มต้องเป็นจำนวนเต็มตั้งแต่ 1 ขึ้นไป (1 = ตัวซ้ายสุดเมื่อหันหน้าเข้าหากำแพง) ครับ',
+      );
+    }
+
+    const taken = await this.memberRepository.findOneBy({
+      cluster_group_id: group,
+      sequence_index: sequence,
+    });
+
+    if (taken && taken.id !== selfId) {
+      throw new UnprocessableEntityException(
+        `ตำแหน่งที่ ${sequence} ของกลุ่ม ${group} เป็นของบ้านเลขที่ ${taken.house_no} อยู่แล้ว — ` +
+          'ตำแหน่งซ้ำกันแปลว่าลำดับกำกวม ซึ่งทำให้ไม่เหลืออะไรแยกมิเตอร์สองตัวนี้เลยครับ',
+      );
+    }
+  }
+
   // สร้างสมาชิกใหม่
   async create(userData: CreateMemberDto): Promise<MemberEntity> {
     let newMember = new MemberEntity();
 
     this.assertCoordinates(userData.latitude, userData.longitude);
+    await this.assertClusterPosition(
+      userData.cluster_group_id,
+      userData.sequence_index,
+    );
 
     // 🌟 กันซ้ำที่ "บ้านเลขที่" อย่างเดียว เพราะ 1 บ้าน = 1 มิเตอร์ = 1 บิล
     //    ไม่กันชื่อ/เบอร์ซ้ำ เพราะในหมู่บ้านมีคนชื่อ-นามสกุลเหมือนกัน (ญาติกัน)
@@ -91,6 +190,10 @@ export class MemberService {
     const memberToSave = this.memberRepository.create({
       ...memberData,
       house_no: memberData.house_no?.trim(),
+      ...MemberService.normalizeCluster(
+        memberData.cluster_group_id,
+        memberData.sequence_index,
+      ),
       craete_by: create_by,
       craeta_date: new Date(),
     });
@@ -234,6 +337,21 @@ export class MemberService {
 
     this.assertCoordinates(userData.latitude, userData.longitude);
 
+    // ฟิลด์ที่ไม่ได้ส่งมาต้องคงของเดิม ส่วนที่ส่งมาเป็น null คือ "สั่งล้าง" จริง ๆ
+    const cluster = MemberService.normalizeCluster(
+      'cluster_group_id' in userData
+        ? userData.cluster_group_id
+        : member.cluster_group_id,
+      'sequence_index' in userData
+        ? userData.sequence_index
+        : member.sequence_index,
+    );
+    await this.assertClusterPosition(
+      cluster.cluster_group_id,
+      cluster.sequence_index,
+      member.id,
+    );
+
     // 🌟 กันซ้ำที่บ้านเลขที่อย่างเดียว (ยกเว้นตัวเอง) — เหตุผลเดียวกับตอนสร้าง
     const houseNo = (userData.house_no ?? member.house_no)?.trim();
     if (houseNo) {
@@ -250,6 +368,7 @@ export class MemberService {
     const memberModify = this.memberRepository.merge(member, {
       ...userData,
       house_no: houseNo,
+      ...cluster,
       modify_date: new Date(),
     });
     return await this.memberRepository.save(memberModify);

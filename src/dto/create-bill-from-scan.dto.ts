@@ -74,15 +74,6 @@ export class CreateBillFromScanDto {
 
   @ApiPropertyOptional({
     description:
-      'ยืนยันว่าพิกัดที่ตรงกับการจดครั้งก่อนเป๊ะทุกทศนิยมนั้นถ่ายใหม่จริง — ' +
-      'ปกติ GPS ไม่เคยให้ค่าเดิมซ้ำ ค่าที่ซ้ำจึงมักแปลว่าพิกัดถูกคัดลอกมาไม่ได้วัดใหม่ ' +
-      '(ถ้า captured_at ซ้ำด้วยจะบล็อกตาย ปุ่มนี้ช่วยไม่ได้ เพราะนั่นคือไฟล์เดิมแน่นอน)',
-    default: false,
-  })
-  confirm_duplicate_location?: boolean;
-
-  @ApiPropertyOptional({
-    description:
       'ยืนยันว่ารูปที่ถ่ายไว้นานกว่า 30 วันก่อนวันจดนั้นเป็นรูปที่ถูกต้องของรอบนี้',
     default: false,
   })

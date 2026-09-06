@@ -474,6 +474,9 @@ describe('BillsService — ด่านตรวจก่อนออกบิ�
   // พิกัดมาจาก body ตรง ๆ และยังไม่ได้เปิด global ValidationPipe
   // ค่าที่เกินช่วงจะไปพังที่ MySQL (error 1264) เป็น 500 ที่ผู้ใช้อ่านไม่รู้เรื่อง
   describe('พิกัดจุดที่ถ่ายรูป', () => {
+    // 14°59'0.21" / 102°7'22.14" — EXIF เก็บเป็น DMS แปลงออกมาแล้วได้เศษซ้ำ
+    const EXIF_LAT = 14 + 59 / 60 + 0.21 / 3600;
+    const EXIF_LNG = 102 + 7 / 60 + 22.14 / 3600;
     it('ปฏิเสธละติจูดที่เกินช่วง ±90 (เคสกรอกสลับกับลองจิจูด)', async () => {
       givenBaseline(1250);
 
@@ -514,44 +517,19 @@ describe('BillsService — ด่านตรวจก่อนออกบิ�
 
     it('ปัดพิกัดให้พอดีกับ scale ของคอลัมน์ (ปัดออกจากศูนย์เหมือน MySQL)', () => {
       // EXIF แปลงจาก DMS แล้วได้เศษซ้ำ — ยาวเกิน 8 ตำแหน่งที่คอลัมน์เก็บได้
-      expect(BillsService.roundCoordinate(14.983391666666667)).toBe(14.98339167);
-      expect(BillsService.roundCoordinate(102.12281666666667)).toBe(102.12281667);
+      expect(BillsService.roundCoordinate(EXIF_LAT)).toBe(14.98339167);
+      expect(BillsService.roundCoordinate(EXIF_LNG)).toBe(102.12281667);
       // ค่าที่สั้นอยู่แล้วต้องไม่ถูกแตะ
       expect(BillsService.roundCoordinate(14.9799)).toBe(14.9799);
       // ครึ่งพอดีปัดออกจากศูนย์ทั้งสองทาง ไม่ใช่ปัดขึ้นแบบ Math.round
       expect(BillsService.roundCoordinate(-1.000000005)).toBe(-1.00000001);
     });
 
-    /**
-     * ด่านกันพิกัดซ้ำคิวรีด้วยค่าที่ส่งเข้ามา ไปเทียบกับแถวที่ MySQL ปัดไว้แล้วตอน INSERT
-     * ถ้าไม่ปัดก่อน 14.983391666666667 จะไม่มีวันเท่ากับ 14.98339167 ที่อยู่ในตาราง
-     * ด่านจึงเงียบทุกครั้ง แล้วแถวใหม่ก็ถูกปัดลงไปซ้ำกับแถวเดิมเป๊ะ ซึ่งเป็นสิ่งที่ด่านมีไว้กัน
-     */
-    it('เทียบด่านกันพิกัดซ้ำด้วยค่าที่ปัดแล้ว ไม่ใช่ค่าดิบจาก EXIF', async () => {
-      givenBaseline(1250);
-
-      await service.createFromScan(
-        dto({ latitude: 14.983391666666667, longitude: 102.12281666666667 }),
-      );
-
-      const calls = meterReadingRepository.findOne.mock.calls as unknown[][];
-      const coordinateLookups = calls
-        .map((call) => (call[0] as { where?: Record<string, unknown> })?.where)
-        .filter((where) => where !== undefined && 'latitude' in where);
-
-      expect(coordinateLookups).toContainEqual(
-        expect.objectContaining({
-          latitude: 14.98339167,
-          longitude: 102.12281667,
-        }),
-      );
-    });
-
     it('บันทึกพิกัดที่ปัดแล้วลงตาราง จะได้เป็นเลขตัวเดียวกับที่ด่านใช้เทียบ', async () => {
       givenBaseline(1250);
 
       await service.createFromScan(
-        dto({ latitude: 14.983391666666667, longitude: 102.12281666666667 }),
+        dto({ latitude: EXIF_LAT, longitude: EXIF_LNG }),
       );
 
       const saved = txManager.create.mock.calls as unknown[][];
@@ -633,34 +611,19 @@ describe('BillsService — ด่านตรวจก่อนออกบิ�
       ).rejects.toThrow(/เป็นไฟล์รูปเดิมที่เคยใช้ไปแล้ว/);
     });
 
-    it('พิกัดซ้ำเป๊ะทุกทศนิยม → ขอให้ยืนยัน (อาจเป็นหน้าเว็บ cache ค่าไว้)', async () => {
+    // พิกัดเดิมเป๊ะเกิดขึ้นได้จริงเมื่อกลับมายืนจุดเดิมรอบถัดไป หรือมิเตอร์ติดกำแพงเดียวกัน
+    // ตัวที่ยังจับรูปใช้ซ้ำคือ captured_at (ชั้น 1) และการถ่ายรัวจุดเดิม (ชั้น 1.5)
+    it('พิกัดซ้ำเป๊ะทุกทศนิยม แต่รูปคนละใบ → ผ่าน ไม่ต้องกดยืนยัน', async () => {
       givenBaseline(1250);
       meterReadingRepository.findOne.mockResolvedValue({
         id: 88,
         members_id: 1,
+        captured_at: null,
       });
 
       await expect(
         service.createFromScan(
           dto({ latitude: 14.9799, longitude: 102.097771 }),
-        ),
-      ).rejects.toThrow(/เป๊ะทุกทศนิยม/);
-    });
-
-    it('พิกัดซ้ำ + กดยืนยัน → ผ่าน', async () => {
-      givenBaseline(1250);
-      meterReadingRepository.findOne.mockResolvedValue({
-        id: 88,
-        members_id: 1,
-      });
-
-      await expect(
-        service.createFromScan(
-          dto({
-            latitude: 14.9799,
-            longitude: 102.097771,
-            confirm_duplicate_location: true,
-          }),
         ),
       ).resolves.toBeDefined();
     });
