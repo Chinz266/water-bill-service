@@ -1,3 +1,4 @@
+import { InputValue } from '../security/input-value';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { REPORT_CATEGORIES } from 'src/report/report.constants';
 // ต้องเป็น `import type` เพราะ tsconfig เปิด isolatedModules + emitDecoratorMetadata ไว้
@@ -15,6 +16,7 @@ export class CreateReportDto {
     description: 'ID ของบ้านที่เรื่องนี้อ้างถึง (ต้องเป็นบ้านที่บัญชีนี้ดูแล)',
     example: 1,
   })
+  @InputValue('integer', { min: 0, max: 2147483647 })
   members_id!: number;
 
   @ApiProperty({
@@ -22,16 +24,19 @@ export class CreateReportDto {
     enum: REPORT_CATEGORIES,
     example: 'WATER_OUT',
   })
+  @InputValue('text', { maxLength: 1000 })
   category!: ReportCategory;
 
   @ApiProperty({
     description: 'รายละเอียดที่ลูกบ้านพิมพ์เอง',
     example: 'น้ำไม่ไหลตั้งแต่เมื่อคืน ทั้งซอยเป็นเหมือนกันครับ',
   })
+  @InputValue('text', { maxLength: 5000 })
   detail!: string;
 
   @ApiPropertyOptional({
     description: 'รูปประกอบแบบ base64 data URL (ย่อขนาดจากฝั่งเว็บแล้ว)',
   })
+  @InputValue('text', { maxLength: 3145728 })
   photo?: string | null;
 }

@@ -17,7 +17,7 @@ export class AccountMemberEntity {
   @PrimaryGeneratedColumn()
   id!: number;
 
-  // อ้างถึง admin.id (บัญชีที่ล็อกอิน ไม่ว่าจะ role admin หรือ member)
+  // อ้างถึง accounts.id (บัญชีลูกบ้านที่ล็อกอินด้วยเบอร์)
   @Column({ name: 'account_id', type: 'int' })
   account_id!: number;
 

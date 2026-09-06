@@ -1,3 +1,4 @@
+import { InputValue } from '../security/input-value';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 /**
@@ -12,6 +13,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
  */
 export class UpdateReadingDto {
   @ApiProperty({ description: 'เลขมิเตอร์ที่ถูกต้อง', example: 1250 })
+  @InputValue('integer', { min: 0, max: 2147483647 })
   current_unit!: string;
 
   @ApiProperty({
@@ -20,6 +22,7 @@ export class UpdateReadingDto {
       '(เก็บลง meter_reading_logs.reason ไม่เกิน 500 ตัวอักษร)',
     example: 'OCR อ่านหลักสุดท้ายผิด เทียบกับรูปหน้าปัดแล้วเป็น 1250',
   })
+  @InputValue('text', { maxLength: 1000 })
   reason!: string;
 
   @ApiPropertyOptional({
@@ -38,6 +41,7 @@ export class UpdateReadingDto {
       'ส่งมาเฉพาะรอบที่ยิงหลังได้ 400 พร้อม code: "high_usage" เท่านั้น ห้ามติ๊กมาล่วงหน้า',
     default: false,
   })
+  @InputValue('text', { maxLength: 1000 })
   confirm_high_usage?: string;
 
   @ApiPropertyOptional({
@@ -46,5 +50,6 @@ export class UpdateReadingDto {
       'ส่งมาเฉพาะรอบที่ยิงหลังได้ 400 พร้อม code: "meter_reset" เท่านั้น ห้ามติ๊กมาล่วงหน้า',
     default: false,
   })
+  @InputValue('text', { maxLength: 1000 })
   confirm_meter_reset?: string;
 }

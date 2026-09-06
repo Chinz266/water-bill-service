@@ -19,8 +19,6 @@ export class MemberService {
     private memberRepository: Repository<MemberEntity>,
     @InjectRepository(MeterReadingEntity)
     private meterReadingRepository: Repository<MeterReadingEntity>,
-    @InjectRepository(BillEntity)
-    private billRepository: Repository<BillEntity>,
     private readonly meterPhotoService: MeterPhotoService,
     private readonly readingLogsService: ReadingLogsService,
   ) {}
@@ -40,7 +38,7 @@ export class MemberService {
    * คอลัมน์เป็น decimal ที่มีที่ให้พอดีกับช่วงจริง (lat ±90, lng ±180)
    * ค่าที่เกินช่วง — พิมพ์ผิด หรือสลับ lat/lng กัน ซึ่งเกิดบ่อยมาก —
    * จะทำให้ MySQL โยน error 1264 ออกมาเป็น 500 ที่ผู้ใช้อ่านไม่รู้เรื่อง
-   * โปรเจกต์นี้ยังไม่ได้เปิด global ValidationPipe จึงต้องดักเองที่ชั้น service
+   * ตรวจซ้ำใน service เพื่อครอบคลุมการเรียกตรงและ DTO ที่ยังไม่มีกฎตรวจพิกัด
    */
   private assertCoordinates(
     latitude?: number | null,
@@ -187,7 +185,7 @@ export class MemberService {
     }
 
     // 1. สร้าง Instance ของ Entity ก่อน
-    // 🌟 คอลัมน์จริงใน DB สะกดว่า craete_by (ไม่ใช่ create_by) และห้ามเป็น NULL
+    // 🌟 create_by ห้ามเป็น NULL (คอลัมน์ NOT NULL + ติด FK กับ admin.id)
     //    ถ้าไม่ map ตรงนี้ ค่าจะหล่นหายแล้ว MySQL จะโยน 500 ออกมา
     const { create_by, ...memberData } = userData;
     const memberToSave = this.memberRepository.create({
@@ -197,8 +195,8 @@ export class MemberService {
         memberData.cluster_group_id,
         memberData.sequence_index,
       ),
-      craete_by: create_by,
-      craeta_date: new Date(),
+      create_by,
+      create_date: new Date(),
     });
     // 2. แล้วค่อยบันทึก
     newMember = await this.memberRepository.save(memberToSave);
@@ -292,9 +290,8 @@ export class MemberService {
               latitude: dto.latitude,
               longitude: dto.longitude,
               villages_id: dto.villages_id,
-              // 🌟 คอลัมน์จริงใน DB สะกดว่า craete_by / craeta_date
-              craete_by: dto.create_by,
-              craeta_date: now,
+              create_by: dto.create_by,
+              create_date: now,
             }),
           );
 

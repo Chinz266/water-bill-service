@@ -13,7 +13,8 @@
 --   npm run migrate -- db/migrate-bill-arrears.sql
 -- =====================================================================
 
-USE `water-bill-db`;
+-- ฐานข้อมูลมาจาก DB_DATABASE ใน .env (ตัวรันเลือกให้ตอนต่อ) — ไฟล์นี้จึงไม่ USE เอง
+-- รันด้วยมือใน phpMyAdmin/CLI ต้องเลือกฐานข้อมูลก่อน
 
 SET NAMES utf8mb4;
 
@@ -71,5 +72,5 @@ UPDATE `bills` SET `grand_total` = `total_amount` WHERE `grand_total` IS NULL;
 -- ตรวจผลลัพธ์
 SELECT `COLUMN_NAME`, `COLUMN_TYPE`, `IS_NULLABLE`
 FROM information_schema.COLUMNS
-WHERE TABLE_SCHEMA = 'water-bill-db' AND TABLE_NAME = 'bills'
+WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'bills'
   AND COLUMN_NAME IN ('arrears_amount', 'grand_total');

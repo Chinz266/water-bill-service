@@ -1,3 +1,5 @@
+import { HealthController } from './controller/health.controller';
+import { LoginRateLimitGuard } from './security/login-rate-limit.guard';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { HttpModule } from '@nestjs/axios';
@@ -11,6 +13,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AdminEntity } from './entity/admin.entity';
 import { MemberEntity } from './entity/member.entity';
 import { AccountMemberEntity } from './entity/account-member.entity';
+import { AccountEntity } from './entity/account.entity';
 import { MemberController } from './controller/member.controller';
 import { MemberService } from './service/member.service';
 import { WaterRatesController } from './controller/water-rates.controller';
@@ -68,16 +71,23 @@ import { HousekeepingService } from './service/housekeeping.service';
     //    พื้นที่ดิสก์ต่างจากสถานะบิลตรงที่ไม่มีใคร "เปิดดู" มันหมดเงียบ ๆ
     //    แล้วระบบล้มตอนที่ยังต้องใช้งานอยู่
     ScheduleModule.forRoot(),
-    TypeOrmModule.forRoot({
-      type: 'mysql',
-      host: 'localhost',
-      port: 3306,
-      username: 'root', // ใส่ username ของ MySQL
-      password: '', // ใส่ password ของ MySQL
-      database: 'water-bill-db', // ใส่ชื่อฐานข้อมูลที่คุณสร้างไว้
-      charset: 'utf8mb4', // 🌟 บังคับ connection เป็น utf8mb4 ไม่งั้นภาษาไทยจะเก็บเป็น ????? (เพี้ยน)
-      entities: [__dirname + '/**/*.entity{.ts,.js}'],
-      synchronize: false, // แนะนำให้เปิด true แค่ตอน Dev (มันจะสร้างตารางให้ตาม Entity อัตโนมัติ)
+    // 🌟 อ่านค่าต่อ DB จาก .env ที่เดียว — ค่าเดิม hardcode ไว้ตรงนี้ ทำให้ .env กับ
+    //    scripts/migrate.ts ชี้คนละฐานข้อมูลได้โดยไม่มีอะไรเตือน (migration ลงที่หนึ่ง
+    //    แอปอ่านอีกที่หนึ่ง แล้วโผล่เป็น ER_BAD_FIELD_ERROR ตอนใช้งาน)
+    //    ค่า default ตรงกับของเดิมทุกตัว เครื่องที่ไม่มี .env จึงยังรันได้เหมือนเดิม
+    TypeOrmModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        type: 'mysql' as const,
+        host: config.get<string>('DB_HOST') ?? 'localhost',
+        port: Number(config.get<string>('DB_PORT') ?? 3306),
+        username: config.get<string>('DB_USERNAME') ?? 'root',
+        password: config.get<string>('DB_PASSWORD') ?? '',
+        database: config.get<string>('DB_DATABASE') ?? 'water-bill-db',
+        charset: 'utf8mb4', // 🌟 บังคับ connection เป็น utf8mb4 ไม่งั้นภาษาไทยจะเก็บเป็น ????? (เพี้ยน)
+        entities: [__dirname + '/**/*.entity{.ts,.js}'],
+        synchronize: false, // ห้ามเปิด — ดู docs/known-issues.md
+      }),
     }),
     // 🔐 อ่านกุญแจเซ็น JWT จาก .env — ถ้าไม่ตั้งไว้จะโยน error ตั้งแต่ตอน boot
     //    ตั้งใจให้ล้มเลยดีกว่าปล่อยให้ระบบรันด้วย secret ค่าว่าง ซึ่งใครก็ปลอม token ได้
@@ -103,6 +113,7 @@ import { HousekeepingService } from './service/housekeeping.service';
     }),
     TypeOrmModule.forFeature([
       AdminEntity,
+      AccountEntity,
       MemberEntity,
       AccountMemberEntity,
       WaterRateEntity,
@@ -123,6 +134,7 @@ import { HousekeepingService } from './service/housekeeping.service';
     ]),
   ],
   controllers: [
+    HealthController,
     AdminController,
     MemberController,
     WaterRatesController,
@@ -139,6 +151,7 @@ import { HousekeepingService } from './service/housekeeping.service';
     AuditController,
   ],
   providers: [
+    LoginRateLimitGuard,
     AdminService,
     MemberService,
     WaterRatesService,

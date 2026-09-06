@@ -212,7 +212,7 @@ export class BillsService {
         'reading',
         'reading.id = bill.meter_readings_id',
       )
-      .where('reading.members_id1 = :membersId', { membersId })
+      .where('reading.members_id = :membersId', { membersId })
       .andWhere('CAST(bill.billing_month AS UNSIGNED) = :month', { month })
       .andWhere('CAST(bill.billing_year AS UNSIGNED) = :year', { year })
       .getOne();
@@ -251,7 +251,7 @@ export class BillsService {
         'reading',
         'reading.id = bill.meter_readings_id',
       )
-      .where('reading.members_id1 = :membersId', { membersId })
+      .where('reading.members_id = :membersId', { membersId })
       .getMany();
 
     return this.sortByMonth(bills);
@@ -277,8 +277,8 @@ export class BillsService {
         'reading',
         'reading.id = bill.meter_readings_id',
       )
-      .addSelect('reading.members_id1', 'owner_members_id')
-      .where('reading.members_id1 IN (:...memberIds)', { memberIds })
+      .addSelect('reading.members_id', 'owner_members_id')
+      .where('reading.members_id IN (:...memberIds)', { memberIds })
       .getRawAndEntities();
 
     entities.forEach((bill, index) => {
@@ -2837,7 +2837,7 @@ export class BillsService {
             reading_date: row.reading_reading_date,
             meter_unit: row.reading_meter_unit,
             // ตั้งชื่อ meter_photo ให้หน้าเว็บ ไม่ส่งชื่อคอลัมน์ evidence_photo ออกไปตรง ๆ
-            // (เป็นแนวเดียวกับที่ API เปลี่ยน members_id1 → members_id และ creat_date → create_date)
+            // (แนวเดียวกับที่ API ไม่ส่งชื่อคอลัมน์ดิบของตารางอื่นออกไปเช่นกัน)
             meter_photo: row.reading_evidence_photo ?? null,
           }
         : null,
@@ -2936,7 +2936,7 @@ export class BillsService {
         'reading',
         'reading.id = bill.meter_readings_id',
       )
-      .innerJoin(MemberEntity, 'member', 'member.id = reading.members_id1')
+      .innerJoin(MemberEntity, 'member', 'member.id = reading.members_id')
       .select('member.id', 'members_id')
       .addSelect('member.house_no', 'house_no')
       .addSelect('member.fname', 'fname')

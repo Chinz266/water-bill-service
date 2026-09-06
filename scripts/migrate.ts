@@ -16,24 +16,68 @@
  *   npm run migrate -- db/migrate-x.sql  รันไฟล์เดียว (ระบุ path หรือแค่ชื่อไฟล์ก็ได้)
  *   npm run migrate -- --status          ดูว่ารันอะไรไปแล้ว เหลืออะไร ไม่แตะ DB
  *   npm run migrate -- --baseline        จด DB ปัจจุบันเป็นจุดตั้งต้น (ดูหัวข้อล่าง)
+ *   npm run migrate -- --auto            โหมดที่ prestart เรียกเอง (ดูหัวข้อล่าง)
  *
- * ⚠️ เรียงลำดับด้วย**ชื่อไฟล์** ไม่ใช่ลำดับที่ควรรันจริง — ชื่อไฟล์ในโปรเจกต์นี้ไม่มีเลขนำหน้า
- *    ไฟล์ที่พึ่งพากันจึงอาจสลับลำดับได้ ตอนตั้ง DB ใหม่ทั้งก้อนให้ใช้ `db/water-bill-db.sql`
- *    แล้วค่อย `--baseline` ตัวรันนี้มีไว้เพื่อ "ตามให้ทัน repo" ทีละไฟล์ที่เพิ่มเข้ามาใหม่
+ * ═══ โหมด --auto: รันพร้อมเซิร์ฟเวอร์ ═══
+ *
+ * ผูกไว้กับ `prestart` / `prestart:dev` ใน package.json — `npm start` ทุกครั้งจึงพา DB
+ * ตามทัน repo ให้เองก่อนเซิร์ฟเวอร์จะขึ้น ต่างจากโหมดปกติสองข้อ:
+ *
+ *   1) ถ้าสมุด `schema_migrations` ยังว่าง จะ --baseline ให้ก่อนอัตโนมัติ ไม่งั้น DB ที่เคย
+ *      รัน migration ด้วยมือมาก่อนจะถูกรันซ้ำทั้งชุดตั้งแต่ต้น
+ *   2) ต่อ MySQL ไม่ติด/ไม่มีฐานข้อมูล = เตือนแล้วปล่อยผ่าน (เซิร์ฟเวอร์ยังขึ้นได้เหมือนเดิม)
+ *      แต่ถ้าต่อติดแล้ว migration พัง = หยุดไม่ให้เซิร์ฟเวอร์ขึ้น เพราะนั่นแปลว่า schema
+ *      ค้างกลางทาง ซึ่งจะไปโผล่เป็น ER_BAD_FIELD_ERROR ตอนมีคนใช้งานจริงแทน
+ *
+ * ═══ ลำดับการรัน ═══
+ *
+ * ตั้งต้นเรียงตามชื่อไฟล์ แล้วจัดใหม่ตามที่แต่ละไฟล์ประกาศไว้ในหัวไฟล์:
+ *
+ *   -- requires: migrate-village-meter-pitch.sql, migrate-meter-digits.sql
+ *
+ * เดิมลำดับยึดชื่อไฟล์อย่างเดียว ซึ่ง **ไม่ตรงกับลำดับที่รันได้จริง** — ตัวอย่างที่ชัดที่สุดคือ
+ * migrate-bill-audit.sql เติมคอลัมน์ต่อท้าย meter_pitch_m ซึ่ง migrate-village-meter-pitch.sql
+ * เป็นคนสร้าง แต่ชื่อ bill- มาก่อน village- ตามตัวอักษร การรันรวดบน DB ที่ตั้งใหม่จึงพังเสมอ
+ * (บน DB ที่ baseline มาแล้วอาการนี้ถูกบังไว้จนมองไม่เห็น)
+ *
+ * ไฟล์ที่ไม่ประกาศอะไรยังเรียงตามชื่อเหมือนเดิม — ใส่ `-- requires:` เฉพาะตอนที่ไฟล์นั้น
+ * อ้างถึงตาราง/คอลัมน์ที่ไฟล์อื่นเป็นคนสร้าง
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash } from 'node:crypto';
 import mysql, { Connection, RowDataPacket } from 'mysql2/promise';
+import { config as loadEnv } from 'dotenv';
+
+// สคริปต์นี้รันนอก Nest จึงไม่มี ConfigModule มาอ่าน .env ให้ ต้องอ่านเอง
+// (อ้างจากตำแหน่งไฟล์ ไม่ใช่ cwd — prestart ถูกเรียกจากที่ไหนก็ได้)
+loadEnv({ path: path.resolve(__dirname, '..', '.env'), quiet: true });
 
 const DB = {
   host: process.env.DB_HOST ?? 'localhost',
   port: Number(process.env.DB_PORT ?? 3306),
-  user: process.env.DB_USER ?? 'root',
+  // รับทั้งสองชื่อ: .env ของโปรเจกต์ใช้ DB_USERNAME/DB_DATABASE ส่วน DB_USER/DB_NAME
+  // เป็นชื่อที่สคริปต์นี้เคยอ่านมาก่อน — เครื่องที่ตั้งชื่อเก่าไว้จะได้ไม่พัง
+  user: process.env.DB_USERNAME ?? process.env.DB_USER ?? 'root',
   password: process.env.DB_PASSWORD ?? '',
-  // ตรงกับที่ app.module.ts ใช้ — เปลี่ยนที่นี่ที่เดียวไม่พอ ต้องเปลี่ยนที่นั่นด้วย
-  database: process.env.DB_NAME ?? 'water-bill-db',
+  // app.module.ts อ่านจาก .env ชุดเดียวกันนี้แล้ว ไม่ต้องแก้สองที่อีก
+  database: process.env.DB_DATABASE ?? process.env.DB_NAME ?? 'water-bill-db',
 };
+
+/**
+ * error ที่แปลว่า "ยังไปไม่ถึง DB" — คนละเรื่องกับ "migration พัง"
+ *
+ * โหมด --auto ปล่อยผ่านกลุ่มนี้ เพราะเซิร์ฟเวอร์ที่ไม่มี DB ก็แค่ error ตอนมีคนเรียก API
+ * เหมือนเดิมทุกประการ ไม่ใช่สถานะใหม่ที่ตัวรันนี้ทำให้เกิด — การบล็อกไม่ให้ start
+ * ตรงนี้จะกลายเป็นว่าเปิด MySQL ไม่ทันแล้วแตะโค้ดฝั่ง frontend ไม่ได้เลย
+ */
+const CANNOT_REACH_DB = new Set([
+  'ECONNREFUSED',
+  'ETIMEDOUT',
+  'ENOTFOUND',
+  'ER_BAD_DB_ERROR',
+  'ER_ACCESS_DENIED_ERROR',
+]);
 
 const MIGRATION_DIR = path.resolve(__dirname, '..', 'db');
 
@@ -57,10 +101,70 @@ interface MigrationFile {
   fullPath: string;
   sql: string;
   checksum: string;
+  /** ไฟล์ที่ต้องรันก่อนหน้าไฟล์นี้ — ประกาศด้วย `-- requires:` ในหัวไฟล์ */
+  requires: string[];
+}
+
+/**
+ * อ่านบรรทัด `-- requires: a.sql, b.sql` ออกจากคอมเมนต์ในไฟล์
+ *
+ * รับได้ทั้งหลายบรรทัดและคั่นจุลภาคในบรรทัดเดียว — เขียนแบบไหนก็อ่านออกเหมือนกัน
+ * เพราะสิ่งที่ต้องกันคือ "ลืมประกาศ" ไม่ใช่ "ประกาศผิดรูปแบบ"
+ */
+export function declaredRequires(sql: string): string[] {
+  const required: string[] = [];
+  for (const match of sql.matchAll(/^\s*--\s*requires:\s*(.+)$/gim)) {
+    for (const name of match[1].split(',')) {
+      const trimmed = name.trim();
+      if (trimmed) required.push(path.basename(trimmed));
+    }
+  }
+  return [...new Set(required)];
+}
+
+/**
+ * เรียงไฟล์ให้ตัวที่ถูกพึ่งพามาก่อนเสมอ
+ *
+ * ไล่ตามลำดับชื่อไฟล์เป็นตัวตั้ง แต่ก่อนจะหยิบไฟล์ไหน ลงไปหยิบไฟล์ที่มันต้องการขึ้นมาก่อน
+ * ผลคือไฟล์ที่ไม่เกี่ยวข้องกันยังเรียงตามชื่อเหมือนเดิม ลำดับจึงยังเดาได้ ไม่ใช่สลับไปทั้งชุด
+ * ทุกครั้งที่เพิ่มไฟล์ใหม่เข้ามา
+ */
+export function orderByDependency(files: MigrationFile[]): MigrationFile[] {
+  const byName = new Map(files.map((file) => [file.name, file]));
+  const ordered: MigrationFile[] = [];
+  const done = new Set<string>();
+  const visiting = new Set<string>();
+
+  const visit = (file: MigrationFile, trail: string[]): void => {
+    if (done.has(file.name)) return;
+    if (visiting.has(file.name)) {
+      throw new Error(
+        `requires วนกลับมาหาตัวเอง: ${[...trail, file.name].join(' -> ')}`,
+      );
+    }
+    visiting.add(file.name);
+
+    for (const name of file.requires) {
+      const dependency = byName.get(name);
+      if (!dependency) {
+        throw new Error(
+          `${file.name} ประกาศ requires: ${name} แต่ไม่มีไฟล์นั้นอยู่ใน db/`,
+        );
+      }
+      visit(dependency, [...trail, file.name]);
+    }
+
+    visiting.delete(file.name);
+    done.add(file.name);
+    ordered.push(file);
+  };
+
+  for (const file of files) visit(file, []);
+  return ordered;
 }
 
 function loadFiles(): MigrationFile[] {
-  return fs
+  const files = fs
     .readdirSync(MIGRATION_DIR)
     .filter((name) => MIGRATION_PATTERN.test(name))
     .sort()
@@ -72,8 +176,11 @@ function loadFiles(): MigrationFile[] {
         fullPath,
         sql,
         checksum: createHash('sha256').update(sql).digest('hex'),
+        requires: declaredRequires(sql),
       };
     });
+
+  return orderByDependency(files);
 }
 
 /**
@@ -427,10 +534,55 @@ async function migrate(
   console.log('');
 }
 
+/**
+ * โหมดที่ prestart เรียก — พา DB ตามทัน repo แบบไม่ต้องมีคนสั่ง
+ *
+ * baseline ให้เองเฉพาะตอนสมุดยังว่างเปล่า ซึ่งแปลได้อย่างเดียวว่า DB ก้อนนี้ตั้งมา
+ * ก่อนตัวรันนี้จะมี — ตัว baseline เองจดเฉพาะไฟล์ที่ตรวจแล้วว่าของมีครบใน DB จริง
+ * ไฟล์ที่ยังไม่ได้รันจะถูกปล่อยให้ migrate() รันต่อตามปกติ ไม่มีอะไรถูกซ่อนไว้
+ */
+async function auto(
+  connection: Connection,
+  files: MigrationFile[],
+): Promise<void> {
+  const applied = await appliedMap(connection);
+
+  if (applied.size === 0) {
+    console.log(
+      '\n📎 DB นี้ยังไม่เคยจดจุดตั้งต้น — baseline ให้อัตโนมัติก่อนหนึ่งครั้ง\n',
+    );
+    await baseline(connection, files);
+  }
+
+  await migrate(connection, files);
+}
+
+/**
+ * โหมด --auto สำหรับสคริปต์อื่นเรียกใช้ (db-setup)
+ *
+ * ต่างจากที่ main() ทำตรงที่ **ไม่ปล่อยผ่านตอนต่อ DB ไม่ติด** — ที่นั่นยอมผ่าน
+ * เพราะเป้าหมายคือ "อย่าขวางไม่ให้เซิร์ฟเวอร์ขึ้น" แต่ตอนตั้งฐานข้อมูล การต่อไม่ติด
+ * คือความล้มเหลวของงานนั้นตรง ๆ ไม่ใช่เรื่องที่ข้ามไปแล้วทำต่อได้
+ */
+export async function autoMigrate(): Promise<void> {
+  const files = loadFiles();
+  const connection = await mysql.createConnection({
+    ...DB,
+    multipleStatements: false,
+  });
+  try {
+    await ensureLedger(connection);
+    await auto(connection, files);
+  } finally {
+    await connection.end();
+  }
+}
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const wantStatus = args.includes('--status');
   const wantBaseline = args.includes('--baseline');
+  const wantAuto = args.includes('--auto');
   const fileArg = args.find((arg) => !arg.startsWith('--'));
   const only = fileArg ? path.basename(fileArg) : undefined;
 
@@ -439,10 +591,25 @@ async function main(): Promise<void> {
     throw new Error(`ไม่พบไฟล์ migrate-*.sql ใน ${MIGRATION_DIR}`);
   }
 
-  const connection = await mysql.createConnection({
-    ...DB,
-    multipleStatements: false,
-  });
+  let connection: Connection;
+  try {
+    connection = await mysql.createConnection({
+      ...DB,
+      multipleStatements: false,
+    });
+  } catch (error) {
+    const code = (error as { code?: string }).code;
+    // ดูคอมเมนต์ที่ CANNOT_REACH_DB ว่าทำไม --auto ถึงไม่บล็อกการ start ตรงนี้
+    if (wantAuto && code && CANNOT_REACH_DB.has(code)) {
+      console.warn(
+        `\n⚠️  ข้าม migration อัตโนมัติ — ต่อ DB "${DB.database}" ที่ ${DB.host}:${DB.port} ไม่ได้ (${code})\n` +
+          '   เซิร์ฟเวอร์จะขึ้นต่อ แต่ทุก endpoint ที่แตะ DB จะ error จนกว่าจะเปิด MySQL\n' +
+          '   เปิดแล้วสั่ง npm run migrate เองได้เลย ไม่ต้องรีสตาร์ท\n',
+      );
+      return;
+    }
+    throw error;
+  }
 
   try {
     await ensureLedger(connection);
@@ -453,6 +620,10 @@ async function main(): Promise<void> {
     }
     if (wantBaseline) {
       await baseline(connection, files);
+      return;
+    }
+    if (wantAuto) {
+      await auto(connection, files);
       return;
     }
 

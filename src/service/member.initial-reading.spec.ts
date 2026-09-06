@@ -3,7 +3,6 @@ import { UnprocessableEntityException } from '@nestjs/common';
 import { MemberService } from './member.service';
 import { MemberEntity } from '../entity/member.entity';
 import { MeterReadingEntity } from '../entity/meter-reading.entity';
-import { BillEntity } from '../entity/bill.entity';
 import { MeterPhotoService } from './meter-photo.service';
 import { ReadingLogsService } from './reading-logs.service';
 
@@ -44,7 +43,6 @@ describe('MemberService.updateInitialReading', () => {
     service = new MemberService(
       memberRepository as unknown as Repository<MemberEntity>,
       meterReadingRepository as unknown as Repository<MeterReadingEntity>,
-      {} as Repository<BillEntity>,
       {} as unknown as MeterPhotoService,
       readingLogs as unknown as ReadingLogsService,
     );

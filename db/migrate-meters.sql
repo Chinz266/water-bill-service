@@ -12,7 +12,8 @@
 --   npm run migrate -- db/migrate-meters.sql
 -- =====================================================================
 
-USE `water-bill-db`;
+-- ฐานข้อมูลมาจาก DB_DATABASE ใน .env (ตัวรันเลือกให้ตอนต่อ) — ไฟล์นี้จึงไม่ USE เอง
+-- รันด้วยมือใน phpMyAdmin/CLI ต้องเลือกฐานข้อมูลก่อน
 
 SET NAMES utf8mb4;
 
@@ -71,9 +72,9 @@ ALTER TABLE `meter_readings`
 -- ตรวจผลลัพธ์
 SELECT `COLUMN_NAME`, `COLUMN_TYPE`, `IS_NULLABLE`
 FROM information_schema.COLUMNS
-WHERE TABLE_SCHEMA = 'water-bill-db' AND TABLE_NAME = 'meter_readings'
+WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'meter_readings'
   AND COLUMN_NAME = 'meters_id';
 
 SELECT COUNT(*) AS `meters_table_exists`
 FROM information_schema.TABLES
-WHERE TABLE_SCHEMA = 'water-bill-db' AND TABLE_NAME = 'meters';
+WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'meters';

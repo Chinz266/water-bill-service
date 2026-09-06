@@ -8,12 +8,14 @@
   "scripts": {
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"scripts/**/*.ts\"",
-    "prestart": "ts-node -T scripts/free-ports.ts",
+    "prestart": "ts-node -T scripts/free-ports.ts && npm run db:auto",
     "start": "concurrently -n api,vision -c cyan,magenta --kill-others-on-fail \"nest start\" \"npm:start:vision\"",
-    "prestart:dev": "ts-node -T scripts/free-ports.ts",
+    "prestart:dev": "ts-node -T scripts/free-ports.ts && npm run db:auto",
     "start:dev": "concurrently -n api,vision -c cyan,magenta --kill-others-on-fail \"npm:start:api\" \"npm:start:vision\"",
     "free-ports": "ts-node -T scripts/free-ports.ts",
     "migrate": "ts-node -T scripts/migrate.ts",
+    "db:setup": "ts-node -T scripts/db-setup.ts",
+    "db:auto": "ts-node -T scripts/migrate.ts --auto",
     "start:api": "nest start --watch",
     "start:vision": "ts-node -T scripts/start-vision.ts",
     "start:debug": "nest start --debug --watch",
@@ -23,7 +25,10 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "seed:admin": "ts-node src/seed/seed-admin.ts"
+    "seed:admin": "ts-node src/seed/seed-admin.ts",
+    "db:backup": "ts-node -T scripts/backup.ts create",
+    "db:restore": "ts-node -T scripts/backup.ts restore",
+    "test:database": "ts-node -T -r tsconfig-paths/register scripts/test-database.ts"
   },
   "dependencies": {
     "@nestjs/axios": "^4.0.1",
@@ -39,6 +44,7 @@
     "bcryptjs": "^3.0.3",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
+    "dotenv": "^17.4.2",
     "exifreader": "^4.42.0",
     "form-data": "^4.0.6",
     "mysql2": "^3.22.5",

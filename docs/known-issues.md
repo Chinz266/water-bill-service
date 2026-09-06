@@ -6,17 +6,15 @@
 
 `app.module.ts` ตั้ง `synchronize: false` ไว้ ถ้าเปิดเป็น `true` TypeORM จะเห็นว่าชื่อคอลัมน์ไม่ตรง (`creat_date` ไม่มี e, `members_id1` มี 1 ต่อท้าย, `craeta_date` / `craete_by` สะกดสลับ) แล้ว **drop คอลัมน์เก่าทิ้งพร้อม FK แล้วสร้างชื่อใหม่** schema จะเพี้ยนจาก `db/water-bill-db.sql` ถาวร
 
-(ตาราง `provinces` / `districts` / `subdistricts` ที่มีข้อมูลรวม 8,369 แถว ไม่มี entity รองรับ TypeORM จึงไม่แตะ — ข้อมูลอ้างอิงพวกนั้นปลอดภัย)
+ตาราง `provinces` / `districts` / `subdistricts` มี Entity ใน `src/entity/location.entity.ts` แล้ว จึงต้องควบคุมการเปลี่ยน schema ผ่าน migration เช่นเดียวกับตารางอื่น
 
-## 🟡 ไม่มี global `ValidationPipe`
+## 🟡 การตรวจข้อมูลรองรับ client เดิม
 
-`class-validator` อยู่ใน dependencies แล้วแต่ DTO ยังไม่มี decorator และ `main.ts` ยังไม่เปิด pipe
+`main.ts` เปิด global `ValidationPipe` และ DTO ตรวจชนิด ช่วงตัวเลข และขนาดข้อความแล้ว ฟิลด์ที่ DTO ไม่ประกาศจะถูกตัดทิ้งแบบไม่ตอบ error เพื่อให้ client รุ่นเก่ายังทำงานได้ Service ยังควรเลือกเฉพาะฟิลด์ที่อนุญาตก่อนเขียนข้อมูลสำคัญ เช่น การสร้างบัญชีผู้ดูแล
 
-ตอนนี้แต่ละ service ต้องดักเองด้วยมือ — `auth.service.ts` เช็ค `email`/`password`, `member.service.ts` เช็คช่วงพิกัดและ accuracy, `bills.service.ts` เช็คเดือน/ปี/วันที่จด/พิกัด, `reports.service.ts` เช็คหมวดหมู่ ยิ่งเพิ่ม endpoint ยิ่งลืม ควรเปิด global `ValidationPipe` แล้วย้ายกฎพวกนี้ไปไว้ที่ DTO
+## 🟡 ต้องมีอัตราค่าน้ำก่อนออกบิล
 
-## 🟡 ตาราง `water_rates` ว่าง
-
-`GET /water-rates/active` คืน 200 พร้อม body ว่าง ต้องมีอัตราค่าน้ำอย่างน้อย 1 แถวถึงจะคิดบิลได้
+ถ้าฐานข้อมูลไม่มีอัตราค่าน้ำที่เปิดใช้งาน จะคิดบิลไม่ได้ ต้องตรวจข้อมูลจริงหลังตั้งระบบ ไม่ควรสรุปว่าตารางว่างจากโค้ดเพียงอย่างเดียว
 
 ---
 

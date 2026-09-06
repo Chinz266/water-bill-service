@@ -17,7 +17,8 @@
 --   npm run migrate -- db/migrate-unassigned-readings.sql
 -- =====================================================================
 
-USE `water-bill-db`;
+-- ฐานข้อมูลมาจาก DB_DATABASE ใน .env (ตัวรันเลือกให้ตอนต่อ) — ไฟล์นี้จึงไม่ USE เอง
+-- รันด้วยมือใน phpMyAdmin/CLI ต้องเลือกฐานข้อมูลก่อน
 
 SET NAMES utf8mb4;
 
@@ -56,4 +57,4 @@ CREATE TABLE IF NOT EXISTS `unassigned_readings` (
 -- ตรวจผลลัพธ์
 SELECT COUNT(*) AS `unassigned_readings_exists`
 FROM information_schema.TABLES
-WHERE TABLE_SCHEMA = 'water-bill-db' AND TABLE_NAME = 'unassigned_readings';
+WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'unassigned_readings';

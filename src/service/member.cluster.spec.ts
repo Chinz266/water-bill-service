@@ -1,10 +1,10 @@
 import { UnprocessableEntityException } from '@nestjs/common';
 import { Repository } from 'typeorm';
+import { BillEntity } from '../entity/bill.entity';
 import { MemberService } from './member.service';
 import { BillsService } from './bills.service';
 import { MemberEntity } from '../entity/member.entity';
 import { MeterReadingEntity } from '../entity/meter-reading.entity';
-import { BillEntity } from '../entity/bill.entity';
 import { WaterRateEntity } from '../entity/water-rate.entity';
 import { VillageEntity } from '../entity/village.entity';
 import { BillArrearsEntity } from '../entity/bill-arrears.entity';
@@ -65,7 +65,6 @@ describe('MemberService — กลุ่มมิเตอร์และตำ�
     service = new MemberService(
       memberRepository as unknown as Repository<MemberEntity>,
       {} as Repository<MeterReadingEntity>,
-      {} as Repository<BillEntity>,
       {} as unknown as MeterPhotoService,
       readingLogs as unknown as ReadingLogsService,
     );
