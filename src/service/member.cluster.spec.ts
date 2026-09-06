@@ -25,6 +25,7 @@ import { ReadingLogsService } from './reading-logs.service';
 
 describe('MemberService — กลุ่มมิเตอร์และตำแหน่งในกลุ่ม', () => {
   let service: MemberService;
+  let readingLogs: { record: jest.Mock };
   let memberRepository: {
     findOneBy: jest.Mock;
     create: jest.Mock;
@@ -59,11 +60,14 @@ describe('MemberService — กลุ่มมิเตอร์และตำ�
       ),
     };
 
+    readingLogs = { record: jest.fn().mockResolvedValue({}) };
+
     service = new MemberService(
       memberRepository as unknown as Repository<MemberEntity>,
       {} as Repository<MeterReadingEntity>,
       {} as Repository<BillEntity>,
       {} as unknown as MeterPhotoService,
+      readingLogs as unknown as ReadingLogsService,
     );
   });
 

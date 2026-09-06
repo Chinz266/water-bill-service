@@ -7,6 +7,7 @@ import { BillEntity } from '../entity/bill.entity';
 import { CreateMemberDto } from '../dto/member-create.dto';
 import { RegisterMemberOnsiteDto } from '../dto/member-onsite.dto';
 import { MeterPhotoService } from './meter-photo.service';
+import { ReadingLogsService } from './reading-logs.service';
 
 /**
  * เทสต์ด่านตรวจพิกัดบ้าน
@@ -27,6 +28,7 @@ describe('MemberService — ด่านตรวจพิกัด', () => {
   };
   let meterReadingRepository: { findBy: jest.Mock };
   let photoService: { save: jest.Mock; remove: jest.Mock };
+  let readingLogs: { record: jest.Mock };
 
   beforeEach(() => {
     memberRepository = {
@@ -53,11 +55,14 @@ describe('MemberService — ด่านตรวจพิกัด', () => {
       remove: jest.fn().mockResolvedValue(undefined),
     };
 
+    readingLogs = { record: jest.fn().mockResolvedValue({}) };
+
     service = new MemberService(
       memberRepository as unknown as Repository<MemberEntity>,
       meterReadingRepository as unknown as Repository<MeterReadingEntity>,
       {} as Repository<BillEntity>,
       photoService as unknown as MeterPhotoService,
+      readingLogs as unknown as ReadingLogsService,
     );
   });
 

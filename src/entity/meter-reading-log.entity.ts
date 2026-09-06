@@ -24,8 +24,15 @@ export class MeterReadingLogEntity {
   @PrimaryGeneratedColumn()
   id!: number;
 
-  @Column({ type: 'int' })
-  bills_id!: number;
+  /**
+   * บิลที่ถูกแก้ — NULL = แก้เลขตั้งต้นตอนลงทะเบียน ซึ่งยังไม่มีบิล
+   *
+   * แถวที่ bills_id เป็น NULL จะมี usage_unit / total_amount เป็น 0 ทั้งคู่ เพราะการจด
+   * ครั้งแรกไม่มีหน่วยน้ำและไม่มียอดเงิน — **ห้ามอ่านเลข 0 พวกนั้นว่าเป็นยอดจริง**
+   * ให้ดูที่ bills_id ก่อนเสมอ (ดู db/migrate-initial-reading-edit.sql)
+   */
+  @Column({ type: 'int', nullable: true })
+  bills_id!: number | null;
 
   @Column({ type: 'int' })
   meter_readings_id!: number;

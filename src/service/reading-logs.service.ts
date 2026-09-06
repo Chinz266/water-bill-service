@@ -7,7 +7,8 @@ import { MemberEntity } from '../entity/member.entity';
 
 /** การแก้หนึ่งครั้งที่รอเขียนลงฐานข้อมูลพร้อมกับบิลที่ถูกแก้ */
 export interface PendingReadingLog {
-  bills_id: number;
+  /** null = แก้เลขตั้งต้นตอนลงทะเบียน ซึ่งยังไม่มีบิล */
+  bills_id: number | null;
   meter_readings_id: number;
   members_id: number | null;
   old_unit: number;

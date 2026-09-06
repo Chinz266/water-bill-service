@@ -1,5 +1,6 @@
 import { Body, Controller, Post } from '@nestjs/common';
 import { MemberService } from 'src/service/member.service';
+import { UpdateInitialReadingDto } from 'src/dto/update-initial-reading.dto';
 import { MemberRemoveDto } from 'src/dto/member-remove.dto';
 import { CreateMemberDto } from 'src/dto/member-create.dto';
 import { RegisterMemberOnsiteDto } from 'src/dto/member-onsite.dto';
@@ -54,6 +55,19 @@ export class MemberController {
   @Post('/update')
   update(@Body() userData: CreateMemberDto) {
     return this.memberService.update(userData);
+  }
+
+  @Post('/initial-reading')
+  @ApiOperation({
+    summary: 'แก้เลขมิเตอร์ตั้งต้นของบ้านที่ลงทะเบียนไปแล้ว',
+    description:
+      'เลขตั้งต้นคือเส้นเริ่มต้นที่บิลใบแรกเอาไปลบ พิมพ์ผิดหลักเดียวทุกบิลของบ้านหลังนั้นผิดตามไปหมด\n\n' +
+      '- ต้องกรอกเหตุผลเสมอ เก็บลง meter_reading_logs (bills_id เป็น NULL เพราะยังไม่มีบิล)\n' +
+      '- เลขใหม่ต้องไม่มากกว่าการจดครั้งถัดไป — มิเตอร์ไม่เดินถอยหลัง\n' +
+      '- **ไม่คิดยอดบิลที่ออกไปแล้วใหม่ให้** ต้องไปแก้ทีละใบผ่าน PATCH /bills/:id/reading เอง',
+  })
+  updateInitialReading(@Body() dto: UpdateInitialReadingDto) {
+    return this.memberService.updateInitialReading(dto);
   }
 
   @Post('/remove')

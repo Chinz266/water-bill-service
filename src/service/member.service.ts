@@ -8,7 +8,9 @@ import { In, Repository } from 'typeorm';
 import { MemberRemoveDto } from 'src/dto/member-remove.dto';
 import { CreateMemberDto } from 'src/dto/member-create.dto';
 import { RegisterMemberOnsiteDto } from 'src/dto/member-onsite.dto';
+import { UpdateInitialReadingDto } from 'src/dto/update-initial-reading.dto';
 import { MeterPhotoService } from './meter-photo.service';
+import { ReadingLogsService } from './reading-logs.service';
 
 @Injectable()
 export class MemberService {
@@ -20,6 +22,7 @@ export class MemberService {
     @InjectRepository(BillEntity)
     private billRepository: Repository<BillEntity>,
     private readonly meterPhotoService: MeterPhotoService,
+    private readonly readingLogsService: ReadingLogsService,
   ) {}
 
   findAll(): Promise<MemberEntity[]> {
@@ -413,4 +416,106 @@ export class MemberService {
       await this.meterPhotoService.remove(reading.evidence_photo);
     }
   }
+
+  /**
+   * แก้เลขมิเตอร์ตั้งต้นของบ้านที่ลงทะเบียนไปแล้ว
+   *
+   * ═══ ทำไมต้องมี ═══
+   *
+   * เลขตั้งต้นคือเส้นเริ่มต้นที่บิลใบแรกเอาไปลบ พิมพ์เกินหนึ่งหลักตอนลงทะเบียน
+   * (1250 เป็น 12500) แล้วทุกบิลของบ้านหลังนั้นผิดตามไปตลอด ทางแก้เดิมคือลบบ้านทิ้ง
+   * แล้วลงใหม่ ซึ่งพาบิลกับประวัติการจดหายไปด้วยทั้งหมด
+   *
+   * ═══ ด่านที่ต้องผ่าน ═══
+   *
+   * เลขใหม่ต้อง **ไม่มากกว่าการจดครั้งถัดไป** — มิเตอร์น้ำไม่เดินถอยหลัง ถ้าปล่อยผ่าน
+   * บิลใบแรกจะได้หน่วยติดลบ แล้วยอดเงินติดลบตามไปด้วยโดยที่ไม่มีด่านไหนของการออกบิล
+   * จับได้ เพราะด่านพวกนั้นตรวจตอนออกบิล ไม่ได้ตรวจย้อนหลังตอนมีคนมาแก้เส้นเริ่มต้น
+   *
+   * ⚠️ ตั้งใจไม่คิดยอดบิลใหม่ให้ — บิลที่ออกไปแล้วเป็นเอกสารที่ลูกบ้านถืออยู่ การไปแก้
+   *    ยอดเงินย้อนหลังเงียบ ๆ คือสิ่งที่ระบบนี้กันไว้ทั้งระบบ คนแก้ต้องไปแก้บิลทีละใบเอง
+   *    ผ่าน PATCH /bills/:id/reading ซึ่งมีด่านและร่องรอยของมันเอง
+   */
+  async updateInitialReading(
+    dto: UpdateInitialReadingDto,
+  ): Promise<{ members_id: number; old_unit: number; new_unit: number }> {
+    const memberId = Number(dto?.id);
+    if (!Number.isInteger(memberId) || memberId <= 0) {
+      throw new UnprocessableEntityException('ต้องระบุ ID ของลูกบ้านที่จะแก้ครับ');
+    }
+
+    const newUnit = Number(dto?.initial_meter_unit);
+    if (!Number.isInteger(newUnit) || newUnit < 0) {
+      throw new UnprocessableEntityException(
+        'เลขมิเตอร์ตั้งต้นต้องเป็นจำนวนเต็มไม่ติดลบครับ',
+      );
+    }
+
+    const reason = String(dto?.reason ?? '').trim();
+    if (!reason) {
+      throw new UnprocessableEntityException(
+        'กรุณากรอกเหตุผลที่แก้ครับ — การแก้เลขตั้งต้นกระทบทุกบิลของบ้านหลังนี้',
+      );
+    }
+
+    const member = await this.memberRepository.findOneBy({ id: memberId });
+    if (!member) {
+      throw new UnprocessableEntityException(`ไม่พบลูกบ้านที่มี ID: ${memberId}`);
+    }
+
+    // การจดครั้งแรกสุดของบ้านหลังนี้คือเลขตั้งต้น เรียงด้วย id ไม่ใช่ reading_date
+    // เพราะ reading_date เป็น date ล้วน วันเดียวกันจึงเท่ากันหมดจนเรียงไม่ออก
+    const readings = await this.meterReadingRepository.find({
+      where: { members_id: memberId },
+      order: { id: 'ASC' },
+      take: 2,
+    });
+
+    const baseline = readings[0];
+    if (!baseline) {
+      throw new UnprocessableEntityException(
+        'บ้านหลังนี้ยังไม่มีการจดเลขมิเตอร์เลยครับ',
+      );
+    }
+
+    const next = readings[1];
+    if (next && newUnit > Number(next.meter_unit)) {
+      throw new UnprocessableEntityException(
+        `เลขตั้งต้นต้องไม่มากกว่าการจดครั้งถัดไป (${Number(next.meter_unit)}) ครับ — มิเตอร์ไม่เดินถอยหลัง`,
+      );
+    }
+
+    const oldUnit = Number(baseline.meter_unit);
+    if (oldUnit === newUnit) return { members_id: memberId, old_unit: oldUnit, new_unit: newUnit };
+
+    await this.meterReadingRepository.manager.transaction(async (manager) => {
+      await manager.update(MeterReadingEntity, baseline.id, {
+        meter_unit: newUnit,
+      });
+
+      // log ต้องอยู่ในทรานแซกชันเดียวกับการแก้ ไม่งั้นจะเหลือ log ของการแก้ที่ rollback ไป
+      // หรือแย่กว่า: แก้สำเร็จแต่ log หาย ซึ่งได้ผลเหมือนไม่เคยมีตาราง log เลย
+      await this.readingLogsService.record(manager, {
+        // การจดครั้งแรกไม่มีบิล — ดู db/migrate-initial-reading-edit.sql
+        bills_id: null,
+        meter_readings_id: baseline.id,
+        members_id: memberId,
+        old_unit: oldUnit,
+        new_unit: newUnit,
+        // ไม่มีหน่วยน้ำและไม่มียอดเงินให้เทียบ เพราะการจดครั้งแรกไม่ได้ออกบิล
+        old_usage_unit: 0,
+        new_usage_unit: 0,
+        old_total_amount: 0,
+        new_total_amount: 0,
+        reason,
+        photo_replaced: false,
+        confirmed_flags: [],
+        changed_by: dto.changed_by ?? null,
+        changed_role: null,
+      });
+    });
+
+    return { members_id: memberId, old_unit: oldUnit, new_unit: newUnit };
+  }
+
 }
