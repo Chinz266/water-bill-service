@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "source": "water-bill-db",
+  "createdAt": "2026-09-05T09:16:47.694Z",
+  "tables": {
+    "accounts": 0,
+    "account_members": 0,
+    "admin": 1,
+    "bills": 0,
+    "bill_arrears": 0,
+    "bill_deletion_logs": 0,
+    "districts": 928,
+    "members": 0,
+    "meters": 0,
+    "meter_readings": 0,
+    "meter_reading_logs": 0,
+    "provinces": 77,
+    "reading_flags": 0,
+    "reports": 0,
+    "schema_migrations": 24,
+    "subdistricts": 7364,
+    "tenancies": 0,
+    "unassigned_readings": 0,
+    "villages": 0,
+    "water_rates": 1
+  },
+  "files": {
+    "database.sql": "e5ad994a5cf748b9a25ba7b199864d9983b7489230fd05461b74b4b462482aac"
+  }
+}
