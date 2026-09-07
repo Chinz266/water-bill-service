@@ -84,6 +84,35 @@ export class VillagesService {
       patch.village_no = no;
     }
 
+    // รหัสไปรษณีย์ไทยเป็นเลข 5 หลักเสมอ ต้องเช็คเองตั้งแต่ตรงนี้เพราะคอลัมน์เป็น
+    // varchar(5) — เลขเกินมาจะโดน MySQL ตัดท้ายทิ้งเงียบ ๆ แทนที่จะฟ้องว่าผิด
+    // ปล่อยว่างได้ (เป็น NULL) เพราะหมู่บ้านที่ยังไม่ได้กรอกก็ออกบิลได้ตามปกติ
+    if (dto.zip_code !== undefined) {
+      const zip = clean(dto.zip_code);
+      if (zip && !/^\d{5}$/.test(zip)) {
+        throw new UnprocessableEntityException(
+          'รหัสไปรษณีย์ต้องเป็นตัวเลข 5 หลัก',
+        );
+      }
+      patch.zip_code = zip as string;
+    }
+
+    // ระยะเดินต่อมิเตอร์เกินช่วงจริงจะทำให้รัศมีเตือนเพี้ยนไปทั้งหมู่บ้าน:
+    // ต่ำเกินไปรัศมีจะแคบจนเตือนแม้ถ่ายถูกบ้าน สูงเกินไปก็ไม่เตือนอะไรเลย
+    // ช่วง 2-60 กว้างพอสำหรับตั้งแต่ตึกแถวจนถึงบ้านสวนที่ห่างกันมาก
+    if (dto.meter_pitch_m !== undefined) {
+      const pitch = dto.meter_pitch_m;
+      if (pitch === null) {
+        patch.meter_pitch_m = null; // กลับไปใช้ค่ากลางของระบบ
+      } else if (!Number.isInteger(pitch) || pitch < 2 || pitch > 60) {
+        throw new UnprocessableEntityException(
+          'ระยะเดินเฉลี่ยต่อมิเตอร์ต้องเป็นจำนวนเต็ม 2-60 เมตร',
+        );
+      } else {
+        patch.meter_pitch_m = pitch;
+      }
+    }
+
     patch.modify_by = modifiedBy;
 
     const merged = this.villageRepository.merge(village, patch);

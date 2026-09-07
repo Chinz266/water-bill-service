@@ -1,11 +1,11 @@
 # WaterService — ระบบจัดการค่าน้ำประปาหมู่บ้าน
 
-ระบบอ่านเลขมิเตอร์น้ำจากรูปถ่ายด้วยโมเดล YOLO แล้วคิดบิลค่าน้ำ ประกอบด้วย 4 ส่วนที่ต้องรันพร้อมกัน
+อ่านเลขมิเตอร์น้ำจากรูปถ่ายด้วยโมเดล YOLO แล้วคิดบิลค่าน้ำ ประกอบด้วย 4 ส่วนที่ต้องรันพร้อมกัน
 
 ```
 ┌─────────────────────┐
 │  Angular  :4200     │   หน้าเว็บ (อยู่คนละ repo)
-│  water-bill-web     │   ../../WaterWeb/water-bill-web
+│  water-bill-web     │   ../water-bill-web
 └──────────┬──────────┘
            │ HTTP + JSON
            ▼
@@ -21,148 +21,109 @@
 └─────────────────────┘
 ```
 
-| ส่วน           | โฟลเดอร์                                 | พอร์ต | ภาษา                                   |
-| -------------- | ---------------------------------------- | ----- | -------------------------------------- |
-| หน้าเว็บ       | `WaterWeb/water-bill-web`                | 4200  | Angular 21 (standalone, zoneless, SSR) |
-| Backend        | `WaterService/water-bill-service-master` | 3000  | NestJS + TypeORM                       |
-| Vision service | `WaterService/meter-vision-service`      | 8000  | Python 3.12 + FastAPI + Ultralytics    |
-| ฐานข้อมูล      | XAMPP                                    | 3306  | MySQL / MariaDB                        |
+| ส่วน           | โฟลเดอร์                            | พอร์ต | ภาษา                                   |
+| -------------- | ----------------------------------- | ----- | -------------------------------------- |
+| หน้าเว็บ       | `../water-bill-web`           | 4200  | Angular 21 (standalone, zoneless) |
+| Backend        | `water-bill-service`   | 3000  | NestJS + TypeORM                       |
+| Vision service | `meter-vision-service` | 8000  | Python 3.12 + FastAPI + Ultralytics    |
+| ฐานข้อมูล      | XAMPP                               | 3306  | MySQL / MariaDB                        |
 
 ---
 
-## วิธีรัน (ต้องเปิด 3 อย่าง ตามลำดับนี้)
+## เริ่มใช้งานครั้งแรก
 
-**1. MySQL** — เปิด XAMPP Control Panel แล้วกด Start ที่ MySQL
+1. **ฐานข้อมูล** — สั่ง `npm run db:setup` ครั้งเดียวจบ (สร้าง DB + import + migrate + seed) → [docs/setup-database.md](docs/setup-database.md)
+2. **Environment** — คัดลอก `.env.example` เป็น `.env` แล้วตั้ง `JWT_SECRET` (ไม่ตั้ง แอปล้มตอน boot โดยเจตนา)
 
-**2. Backend + Vision service** (คำสั่งเดียว รันทั้งคู่ผ่าน `concurrently`)
+   ```powershell
+   node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
+   ```
+
+3. **รัน** — ตามหัวข้อถัดไป
+
+---
+
+## วิธีรัน (เปิด 3 อย่าง ตามลำดับ)
+
+**1. MySQL** — เปิด XAMPP Control Panel กด Start ที่ MySQL (ต้องขึ้นก่อน backend เสมอ ไม่งั้น TypeORM ต่อไม่ติดตอน bootstrap)
+
+**2. Backend + Vision service** — คำสั่งเดียว รันทั้งคู่ผ่าน `concurrently`
 
 ```powershell
-cd water-bill-service-master
+cd water-bill-service
 npm run start:dev
 ```
 
-`start:dev` จะสตาร์ท NestJS (`[api]`) พร้อม FastAPI (`[vision]`) โดยหา Python จาก `meter-vision-service/venv` ให้เอง
-ถ้ายังไม่ได้สร้าง venv มันจะข้าม vision service พร้อมพิมพ์วิธีติดตั้ง แล้วปล่อยให้ NestJS รันต่อตามปกติ
-(อยากรันแยกก็ยังทำได้: `npm run start:api` และ `npm run start:vision`)
+`npm start` และ `npm run start:dev` สตาร์ท NestJS (`[api]`) พร้อม FastAPI (`[vision]`) เสมอ ต่างกันแค่ `start:dev` เปิด `--watch`
+`prestart` / `prestart:dev` เคลียร์พอร์ต 3000 กับ 8000 แล้วรัน migration ที่ค้างอยู่ให้ก่อนอัตโนมัติ
+(ดู [setup-database.md](docs/setup-database.md) — ต่อ MySQL ไม่ติดจะเตือนแล้วปล่อยผ่าน แต่ถ้า migration พังจะไม่ยอมให้เซิร์ฟเวอร์ขึ้น)
+(รันแยกได้: `npm run start:api`, `npm run start:vision`)
 
 **3. หน้าเว็บ**
 
 ```powershell
-cd ..\..\WaterWeb\water-bill-web
+cd ..\water-bill-web
 ng serve
 ```
 
 เปิด `http://localhost:4200` — Swagger ของ backend อยู่ที่ `http://localhost:3000/api`
 
----
+### venv ของ vision service ติดตั้งให้เอง
 
-## ตั้งค่าฐานข้อมูลครั้งแรก
+`scripts/start-vision.ts` หา Python จาก `meter-vision-service/venv` (หรือ `.venv`) รองรับทั้ง Windows และ macOS/Linux **ถ้ายังไม่มี venv จะสร้างให้เองแล้ว `pip install -r requirements.txt` ต่อทันที** — ครั้งแรกนาน เพราะ `ultralytics` ลาก `torch` มาราว 2GB ครั้งต่อไปเจอ venv เดิมแล้วสตาร์ทเลย
 
-สร้าง database ชื่อ `water-bill-db` แล้ว import dump:
+ติดตั้งไม่สำเร็จ (ไม่มี Python / pip พัง) สคริปต์พิมพ์วิธีติดตั้งเองแล้วจบด้วย exit code 0 **โดยเจตนา** — `concurrently` ตั้ง `--kill-others-on-fail` ไว้ ถ้าจบแบบ error NestJS จะถูกฆ่าตามไปด้วย ผลคือ backend รันต่อได้ เสียแค่หน้าสแกนมิเตอร์
 
-```powershell
-& "C:\xampp\mysql\bin\mysql.exe" -u root water-bill-db < db\water-bill-db.sql
-```
-
-`synchronize` ถูกตั้งเป็น `false` ใน `src/app.module.ts` และ **ควรปล่อยไว้แบบนั้น** — ดูหัวข้อ "ปัญหาที่ยังค้าง" ว่าทำไมการเปิดมันถึงอันตราย
-
-### การแก้ schema ที่ทำไปแล้ว (ยังไม่ได้ใส่กลับใน dump)
-
-ตาราง `admin` ใน `db/water-bill-db.sql` เก่ากว่า `AdminEntity` อยู่ 5 คอลัมน์ **และไม่มีแถวแอดมินเลยสักแถว** หลัง import dump ใหม่ให้รัน:
-
-```powershell
-npm run seed:admin
-```
-
-สคริปต์นี้เติมคอลัมน์ที่ขาด (เพิ่มอย่างเดียว ไม่ลบของเดิม) แล้วสร้างแอดมินเริ่มต้นให้ รันซ้ำได้ไม่พัง
-เปลี่ยนบัญชีเริ่มต้นได้ด้วย `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` ใน `.env` (ดู `.env.example`)
-
-หรือถ้าอยากรัน SQL เองก็ได้:
-
-```sql
-ALTER TABLE `admin`
-  ADD COLUMN `create_date` datetime NOT NULL,
-  ADD COLUMN `create_by`   int(11) DEFAULT NULL,
-  ADD COLUMN `modify_by`   int(11) DEFAULT NULL,
-  ADD COLUMN `modify_date` datetime DEFAULT NULL,
-  ADD COLUMN `email`       varchar(100) NULL AFTER `lname`;
-
--- เติมอีเมลให้แถวที่มีอยู่ก่อน แล้วค่อยบังคับ NOT NULL + UNIQUE
-UPDATE `admin` SET `email` = CONCAT('user', id, '@example.com') WHERE `email` IS NULL;
-ALTER TABLE `admin` MODIFY COLUMN `email` varchar(100) NOT NULL;
-ALTER TABLE `admin` ADD UNIQUE KEY `IDX_admin_email` (`email`);
-```
+> ⚠️ `torch` ยังไม่มี wheel ให้ Python รุ่นใหม่สุดเสมอไป ถ้า pip ล้มตอน bootstrap ให้สร้าง venv ด้วย **Python 3.12** เอง:
+>
+> ```powershell
+> cd meter-vision-service
+> py -3.12 -m venv venv
+> .\venv\Scripts\Activate.ps1
+> pip install -r requirements.txt
+> ```
 
 ---
 
-## การเข้าสู่ระบบ
+## คำสั่งที่ใช้บ่อย
 
-ใช้ **อีเมล** เป็น username (เดิมเคยใช้เบอร์โทร) ส่วน `phone` ยังอยู่ในตารางแต่เป็น nullable
+| คำสั่ง               | ทำอะไร                                                |
+| -------------------- | ----------------------------------------------------- |
+| `npm run start:dev`  | รัน API + vision service พร้อม watch                  |
+| `npm test`           | unit test (ปัจจุบัน **214 เทสต์ ผ่านทั้งหมด**)         |
+| `npm run test:database` | สำรองและกู้ลงฐานทดสอบใหม่ แล้วทดสอบ API กับ MySQL จริง |
+| `npm run db:backup` | สำรองฐานข้อมูลและรูป พร้อม checksum |
+| `npm run test:watch` | รันเทสต์ค้างไว้ แก้โค้ดแล้วรันซ้ำให้เอง               |
+| `npm run seed:admin` | เติมคอลัมน์ที่ตาราง `admin` ขาด + สร้างแอดมินเริ่มต้น |
+| `npm run free-ports` | เคลียร์พอร์ต 3000 / 8000 ที่ค้างอยู่                  |
+| `npm run db:setup`   | ตั้งฐานข้อมูลทั้งก้อนด้วยคำสั่งเดียว (สร้าง DB + import + migrate + seed) |
+| `npm run migrate`    | รัน migration ที่ยังไม่ได้รัน (`npm start` เรียกให้เองอยู่แล้ว) |
+| `npm run lint`       | ESLint + Prettier (แก้อัตโนมัติ)                      |
+| `npm run build`      | build ลง `dist/`                                      |
 
-บัญชีทดสอบ: `somying@example.com` / `password123` (สร้างด้วย `npm run seed:admin` — ไม่ได้มากับ dump)
+เทสต์ทั้ง 81 ตัวเป็น unit test ที่ mock repository ไม่ต้องต่อฐานข้อมูล กระจายใน 5 ไฟล์:
 
-หน้าเว็บเก็บ session ไว้ใน `localStorage` (key `water-bill.admin`) และมี `authGuard` กันหน้าที่ต้องล็อกอิน
-
-| Route                                    | ต้องล็อกอิน                           |
-| ---------------------------------------- | ------------------------------------- |
-| `/login`, `/register`                    | ไม่ (ล็อกอินอยู่แล้วจะเด้งไป `/home`) |
-| `/home`, `/scan`, `/history`, `/members` | ใช่                                   |
-
-> **guard ป้องกันแค่หน้าเว็บ ไม่ได้ป้องกัน API** ทุก endpoint ของ backend ยังเรียกได้โดยไม่ต้องล็อกอิน
-
----
-
-## API
-
-### NestJS — `http://localhost:3000`
-
-| Method          | Path                                                                                    | หมายเหตุ                            |
-| --------------- | --------------------------------------------------------------------------------------- | ----------------------------------- |
-| POST            | `/auth/register`                                                                        | `{ fname, lname, email, password }` |
-| POST            | `/auth/login`                                                                           | `{ email, password }`               |
-| POST            | `/auth/google`                                                                          | ยังไม่เปิดใช้งาน (422 เสมอ)         |
-| POST            | `/member/all`, `/member/find-one`, `/member/create`, `/member/update`, `/member/remove` |                                     |
-| POST            | `/admin/all`, `/admin/find-one`, `/admin/create`, `/admin/update`, `/admin/remove`      |                                     |
-| POST/GET        | `/meter-readings`, `/meter-readings/member/:memberId`                                   | ⚠️ GET พัง                          |
-| POST            | `/meter-readings/ocr-upload`                                                            | อัปโหลดรูป → เรียก vision service   |
-| POST/GET/DELETE | `/bills`, `/bills/:id`                                                                  |                                     |
-| POST/GET        | `/villages`, `/villages/:id`                                                            | ⚠️ GET พัง                          |
-| POST/GET        | `/water-rates`, `/water-rates/active`                                                   |                                     |
-
-### Vision service — `http://localhost:8000`
-
-| Method | Path      | หมายเหตุ                                                 |
-| ------ | --------- | -------------------------------------------------------- |
-| GET    | `/health` | เช็คสถานะ + ดู class ของโมเดล                            |
-| POST   | `/detect` | อัปโหลดรูป (multipart field ชื่อ `file`) → คืนเลขมิเตอร์ |
-
-โมเดลมี 12 class: `0`–`9` คือตัวเลขแต่ละหลัก, `10` = `border_decimal_point`, `11` = `border_water_meter_number`
-
-ตัวอย่างผลลัพธ์ `/detect`:
-
-```json
-{
-  "success": true,
-  "read_unit": "00025",
-  "integer_part": "00025",
-  "decimal_part": "312",
-  "full_reading": "00025312",
-  "confidence": 0.91,
-  "message": "สกัดค่าตัวเลขสำเร็จ"
-}
-```
-
-`read_unit` (ส่วนจำนวนเต็ม สีดำบนหน้าปัด) คือค่าที่ backend เอาไปคิดบิล
+| ไฟล์                             | ครอบอะไร                                                            |
+| -------------------------------- | ------------------------------------------------------------------- |
+| `bills.service.spec.ts`          | เดือน/ปีบิล, วันที่จด, เปลี่ยนมิเตอร์/วนรอบ, จำนวนหลัก, ลบบิล, พิกัด |
+| `scan-batch.service.spec.ts`     | จับคู่รูปกับบ้าน, รูปชี้บ้านซ้ำ, บ้านที่ออกบิลแล้ว, จำนวนหลัก, EXIF  |
+| `member.service.spec.ts`         | ด่านตรวจพิกัด, ลงทะเบียนแบบยืนที่มิเตอร์, ลบลูกบ้าน                  |
+| `photo-metadata.service.spec.ts` | อ่าน EXIF, Haversine                                                 |
+| `app.controller.spec.ts`         | smoke test                                                           |
 
 ---
 
 ## Environment variables
 
-**Backend** — `.env`
+| ตัวแปร                           | ค่าเริ่มต้น             | หมายเหตุ                                           |
+| -------------------------------- | ----------------------- | -------------------------------------------------- |
+| `JWT_SECRET`                     | —                       | **ต้องตั้ง** ไม่ตั้งแอปจะโยน error ตั้งแต่ตอน boot |
+| `JWT_EXPIRES_IN`                 | `1d`                    |                                                    |
+| `VISION_SERVICE_URL`             | `http://127.0.0.1:8000` |                                                    |
+| `DB_HOST` / `DB_PORT` / `DB_*`   | localhost / 3306 / root | ใช้โดย `npm run seed:admin` เท่านั้น               |
+| `SEED_ADMIN_EMAIL` / `_PASSWORD` | ดู `.env.example`       | บัญชีแอดมินที่ seed สร้างให้                       |
 
-| ตัวแปร               | ค่าเริ่มต้น             |
-| -------------------- | ----------------------- |
-| `VISION_SERVICE_URL` | `http://127.0.0.1:8000` |
+ตั้งใจให้แอปล้มเลยดีกว่าปล่อยให้รันด้วย secret ค่าว่าง ซึ่งใครก็ปลอม token ได้
 
 **Vision service** — ตั้งผ่าน env ตอนรัน (ไม่มีไฟล์ `.env`)
 
@@ -175,62 +136,46 @@ ALTER TABLE `admin` ADD UNIQUE KEY `IDX_admin_email` (`email`);
 
 ---
 
-## ปัญหาที่ยังค้าง
+## การเข้าสู่ระบบ
 
-### 🔴 `GET /villages` และ `GET /meter-readings` คืน 500
+ผู้ใช้ 2 ชนิด แยก token คนละชุด
 
-ชื่อคอลัมน์ใน entity ไม่ตรงกับในฐานข้อมูล (ฐานข้อมูลสะกดผิดมาแต่แรก):
+| ชนิด              | เปิดบัญชียังไง                                   | ล็อกอินด้วย | เห็นอะไร                  |
+| ----------------- | ------------------------------------------------ | ----------- | ------------------------- |
+| แอดมิน (หมู่บ้าน) | `POST /auth/register` — **แอดมินที่ล็อกอินอยู่เป็นคนเปิดให้** | อีเมล       | ทุกอย่าง                  |
+| ลูกบ้าน           | เกิดเองตอนล็อกอินครั้งแรก (`POST /auth/member/login`) | เบอร์โทร    | เฉพาะบ้านตัวเอง (`/me/*`) |
 
-| Entity ประกาศว่า                 | คอลัมน์จริงใน DB             |
-| -------------------------------- | ---------------------------- |
-| `VillageEntity.create_date`      | `villages.craeta_date`       |
-| `MeterReadingEntity.members_id`  | `meter_readings.members_id1` |
-| `MeterReadingEntity.create_date` | `meter_readings.creat_date`  |
+🔐 `POST /auth/register` **ไม่ใช่หน้าสมัครสาธารณะ** — ของเดิมเป็น `@Public()` ซึ่งแปลว่า
+ใครก็เปิดบัญชีแอดมินให้ตัวเองแล้วเข้าหลังบ้านได้ทันที ตอนนี้ต้องล็อกอินเป็นแอดมินก่อน
+(หน้าเว็บย้ายทางเข้าไปไว้ที่หน้า "ตั้งค่าผู้ดูแล" แล้ว)
 
-ทำให้หน้า `/scan` และ `/history` ใช้ไม่ได้ แก้ได้สองทาง — เปลี่ยนชื่อคอลัมน์ใน DB ให้ถูก (ต้องระวัง FK ที่ผูกกับ `members_id1`) หรือใส่ `@Column({ name: 'craeta_date' })` ในเอนทิตีให้แมปชื่อผิดนั้น แบบที่ `member.entity.ts` ทำอยู่แล้ว
+ลูกบ้านไม่มีขั้นตอนสมัครแยก — ล็อกอินด้วยเบอร์ที่แอดมินลงทะเบียนไว้กับบ้านแล้วระบบเปิดบัญชีให้เอง
+สิทธิ์เห็นบ้านหลังไหนคุมที่ตาราง `account_members` (บัญชีเดียวดูได้หลายบ้าน)
 
-### 🔴 อย่าเปิด `synchronize: true`
+บัญชีแอดมินทดสอบ: `somying@example.com` / `password123` (มาจาก `npm run seed:admin` ไม่ได้มากับ dump)
 
-`app.module.ts` ตั้ง `synchronize: false` ไว้ ถ้าเปิดเป็น `true` TypeORM จะเห็นว่าชื่อคอลัมน์ไม่ตรงตามตารางข้างบน แล้ว **drop คอลัมน์เก่าทิ้งพร้อม FK แล้วสร้างชื่อใหม่** schema จะเพี้ยนจาก `db/water-bill-db.sql` ถาวร
-
-(ตาราง `provinces` / `districts` / `subdistricts` ที่มีข้อมูลรวม 8,369 แถว ไม่มี entity รองรับ TypeORM จึงไม่แตะ — ข้อมูลอ้างอิงพวกนั้นปลอดภัย)
-
-### 🔴 รหัสผ่านเก็บเป็น plaintext และยังไม่มี JWT
-
-`auth.service.ts` เทียบรหัสผ่านตรง ๆ ด้วย `admin.password !== data.password` และ `login` คืน object `admin` ทั้งก้อน **รวม password** กลับมาให้หน้าเว็บ ต้องทำ bcrypt + JWT ก่อนขึ้น production
-
-### 🟡 ไม่มี `ValidationPipe`
-
-DTO ไม่มี decorator ของ `class-validator` เลย body ที่ขาด field จะหลุดไปพังที่ระดับ TypeORM เป็น 500 ตอนนี้ `auth.service.ts` มี guard เช็ค `email`/`password` ด้วยมือ แต่ endpoint อื่นยังไม่มี
-
-### 🟡 ตาราง `water_rates` ว่าง
-
-`GET /water-rates/active` คืน 200 พร้อม body ว่าง ต้องมีอัตราค่าน้ำอย่างน้อย 1 แถวถึงจะคิดบิลได้
-
-### 🟡 `CONF_THRESHOLD` ในโค้ดกับใน `meter-vision-service/README.md` ไม่ตรงกัน
-
-โค้ดตั้ง `0.8` แต่ README ของ service นั้นบอก `0.35` ค่า 0.8 สูงมากสำหรับการตรวจเลขเล็ก ๆ บนหน้าปัด อาจทำให้ `/detect` คืน "ไม่พบตัวเลขมิเตอร์" บ่อยเกินจริง ปรับได้โดยไม่ต้องแก้โค้ด: `$env:CONF_THRESHOLD="0.35"` ก่อนรัน
+API ป้องกันด้วย `JwtAuthGuard` + `RolesGuard` ที่ลงทะเบียนเป็น `APP_GUARD` ระดับ global — **ทุก route ปิดเป็นค่าเริ่มต้น** route สาธารณะต้องแปะ `@Public()` เอง (ลืมแปะ = ปิด ซึ่งปลอดภัยกว่าลืมแปะ = เปิดทิ้ง)
 
 ---
 
-## จุดที่มักสะดุด
+## เอกสารเพิ่มเติม
 
-**`EADDRINUSE: address already in use :::3000`** — `npm run start:dev` แตก process ลูกเป็น `node dist/main` (และ `python.exe` สำหรับ vision service) การกด Ctrl+C หรือปิด terminal บางครั้งฆ่าแค่ตัวแม่ ตัวลูกยังถือพอร์ตอยู่
+| ไฟล์                                                | เนื้อหา                                                                     |
+| --------------------------------------------------- | --------------------------------------------------------------------------- |
+| [docs/setup-database.md](docs/setup-database.md)     | import dump, migration (รันเองพร้อมเซิร์ฟเวอร์), seed แอดมิน, เรื่อง `decimal(11,8)`   |
+| [docs/api.md](docs/api.md)                           | ตาราง endpoint ทั้งหมด, พอร์ทัลลูกบ้าน, สัญญาของ vision service             |
+| [docs/billing-rules.md](docs/billing-rules.md)       | เลขตั้งต้นที่ใช้คิดหน่วย, ด่านกันข้อมูลผิดตอนออกบิล, ลงทะเบียนแบบยืนที่มิเตอร์ |
+| [docs/scan-batch.md](docs/scan-batch.md)             | จับคู่รูปกับบ้าน, บทบาทของ GPS, EXIF หายง่ายแค่ไหน                          |
+| [docs/offline-mode.md](docs/offline-mode.md)         | หน้างานไม่มีสัญญาณ — คิวใน IndexedDB, `client_uuid` กันบิลซ้ำ, สิ่งที่ UI ต้องมี |
+| [docs/known-issues.md](docs/known-issues.md)         | ปัญหาที่ยังค้าง, ช่องที่ยังหลุด, จุดที่มักสะดุด                              |
+| [meter-vision-service/README.md](meter-vision-service/README.md) | รายละเอียดฝั่งโมเดล YOLO                                       |
 
-ตอนนี้ `prestart:dev` จะรัน `scripts/free-ports.js` เคลียร์พอร์ต 3000 กับ 8000 ให้อัตโนมัติทุกครั้งก่อนสตาร์ท ปกติจึงไม่ควรเจอ error นี้อีก ถ้าอยากเคลียร์เองแยก ๆ:
+---
 
-```powershell
-npm run free-ports
-```
+## กฎการเขียนโค้ด
 
-**ต้องเปิด MySQL ก่อน backend เสมอ** ไม่งั้น TypeORM ต่อไม่ติดตอน bootstrap
-
-**Vision service ใช้เวลาโหลดโมเดลตอนสตาร์ท** ให้รอ `/health` ตอบ 200 ก่อนค่อยยิงงานเข้าไป
-
-cd C:\Users\ajatu\Documents\WaterService\meter-vision-service
-
-> > .\venv\Scripts\Activate.ps1
-> > uvicorn main:app --port 8000
-
-cd water-bill-service-master
-npm run start:dev
+- TypeScript เท่านั้น (ห้าม JavaScript)
+- Angular component ใช้ `standalone: true` เสมอ
+- UI ใช้คลาสและตัวแปรสีจาก `styles.css` ธีม Sci-Fi
+- ข้อความแจ้งเตือนผู้ใช้เป็นภาษาไทย
+- อย่าเปิด `synchronize: true` — เหตุผลอยู่ใน [docs/known-issues.md](docs/known-issues.md)

@@ -1,4 +1,5 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { InputValue } from '../security/input-value';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import { REPORT_STATUSES } from 'src/report/report.constants';
 // ต้องเป็น `import type` เพราะ tsconfig เปิด isolatedModules + emitDecoratorMetadata ไว้
 import type { ReportStatus } from 'src/report/report.constants';
@@ -15,6 +16,7 @@ export class ReplyReportDto {
     description: 'ข้อความตอบกลับถึงลูกบ้าน',
     example: 'ช่างเข้าไปตรวจแล้วครับ คาดว่าน้ำจะไหลปกติภายในเย็นนี้',
   })
+  @InputValue('text', { maxLength: 5000 })
   admin_reply?: string;
 
   @ApiPropertyOptional({
@@ -22,5 +24,6 @@ export class ReplyReportDto {
     enum: REPORT_STATUSES,
     example: 'InProgress',
   })
+  @InputValue('text', { maxLength: 1000 })
   status?: ReportStatus;
 }

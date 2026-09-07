@@ -11,12 +11,10 @@ export class AdminEntity {
   @Column({ type: 'varchar', length: 45, nullable: true })
   lname!: string;
 
-  // 🌟 nullable เพราะบัญชีลูกบ้าน (role='member') ไม่มีอีเมล ล็อกอินด้วยเบอร์แทน
+  // nullable เพราะแถวเก่าบางแถวยังไม่ได้กรอกอีเมล — บัญชีที่เปิดใหม่ต้องมีเสมอ
   @Column({ type: 'varchar', length: 100, unique: true, nullable: true })
   email!: string | null;
 
-  // 🌟 unique เพราะเป็น "username" ของบัญชีลูกบ้าน (คนละเรื่องกับ members.phone
-  //    ที่เป็นเบอร์ติดต่อของบ้าน ซึ่งซ้ำกันได้ระหว่างบ้าน)
   @Column({ type: 'varchar', length: 20, nullable: true, unique: true })
   phone!: string | null;
 
@@ -24,14 +22,15 @@ export class AdminEntity {
   @Column({ type: 'varchar', length: 255, nullable: true })
   password!: string;
 
-  // ระดับสิทธิ์ภายในฝั่งผู้ดูแล ส่วนสิทธิ์หลักใน JWT จะเป็น `admin`
-  @Column({
-    type: 'enum',
-    enum: ['owner', 'staff'],
-    name: 'admin_role',
-    default: 'staff',
-  })
-  adminRole!: 'owner' | 'staff';
+  // 🌟 สิทธิ์ของผู้ดูแล — ตอบว่า "แก้ของเก่าได้แค่ไหน"
+  //    (owner แก้บิลย้อนหลังได้ / staff แก้ได้จำกัด)
+  //    ค่าเริ่มต้นเป็น staff เสมอ เพราะ POST /auth/register เป็น endpoint สาธารณะ —
+  //    บัญชีที่เปิดเองต้องไม่ได้สิทธิ์แก้ยอดเงินย้อนหลังติดมาด้วย
+  //
+  //    ⚠️ ไม่มีคอลัมน์ role แล้ว — ทุกแถวในตารางนี้คือผู้ดูแล บัญชีลูกบ้านย้ายไป
+  //       ตาราง accounts (ดู AccountEntity + db/migrate-accounts-table.sql)
+  @Column({ type: 'enum', enum: ['owner', 'staff'], default: 'staff' })
+  admin_role!: 'owner' | 'staff';
 
   // 🌟 รูปโปรไฟล์ผู้ดูแล เก็บเป็น base64 data URL (ย่อขนาดจากฝั่งเว็บก่อนแล้ว)
   //    MEDIUMTEXT เพราะ varchar สั้นเกินเก็บ base64 ไม่พอ

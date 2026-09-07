@@ -1,0 +1,97 @@
+-- =====================================================================
+-- ด่านตรวจสอบบิลชุดใหญ่ — กำหนดชำระ / คาบบิล / ความมั่นใจของ OCR
+--
+-- migration นี้เพิ่มคอลัมน์ 4 ตัวใน 3 ตาราง ทุกตัวเป็น nullable หรือมี default
+-- ระบบเดิมจึงทำงานต่อได้ทันทีหลังรัน ไม่ต้องไปเติมค่าย้อนหลังก่อน
+--
+-- รันคำสั่งนี้ครั้งเดียว:
+--   npm run migrate -- db/migrate-bill-audit.sql
+-- =====================================================================
+
+-- ต้องรันหลังไฟล์เหล่านี้ (ตัวรันจัดลำดับให้เองตามบรรทัดนี้ ดู scripts/migrate.ts):
+--   migrate-meter-digits.sql — ต่อท้าย meter_readings.meter_digits
+--   migrate-village-meter-pitch.sql — ต่อท้าย villages.meter_pitch_m
+-- requires: migrate-meter-digits.sql, migrate-village-meter-pitch.sql
+
+-- ฐานข้อมูลมาจาก DB_DATABASE ใน .env (ตัวรันเลือกให้ตอนต่อ) — ไฟล์นี้จึงไม่ USE เอง
+-- รันด้วยมือใน phpMyAdmin/CLI ต้องเลือกฐานข้อมูลก่อน
+
+SET NAMES utf8mb4;
+
+-- ─────────────────────────────────────────────────────────────────────
+-- 1) bills.due_date — วันครบกำหนดชำระ
+--
+-- ของเดิมสถานะ 'Overdue' ต้องกดเปลี่ยนเอง ไม่มีอะไรบอกว่า "เลยกำหนดแล้ว"
+-- บ้านค้าง 6 เดือนจึงเห็นเป็นบิล 'Pending' 6 ใบแยกกัน ต้องนั่งนับเอง
+--
+-- NULL = บิลเก่าที่ออกก่อน migration นี้ — markOverdue() จะข้ามแถวพวกนี้ไป
+-- ตั้งใจไม่เติมค่าย้อนหลัง เพราะกำหนดชำระที่คิดขึ้นเองทีหลังไม่ใช่ข้อเท็จจริง
+-- และการดีดบิลเก่าเป็น Overdue ยกล็อตจะกลบภาพว่าใบไหนค้างจริง
+-- ─────────────────────────────────────────────────────────────────────
+ALTER TABLE `bills`
+  ADD COLUMN `due_date` date DEFAULT NULL
+    COMMENT 'วันครบกำหนดชำระ (NULL = บิลเก่าก่อนมีระบบกำหนดชำระ)'
+    AFTER `billing_year`;
+
+-- ─────────────────────────────────────────────────────────────────────
+-- 2) bills.period_months — บิลใบนี้ครอบคลุมกี่เดือน
+--
+-- ไม่ได้จดเดือน ก.ค. แล้วมาจดเดือน ส.ค. จะได้หน่วยน้ำสองเดือนรวมเป็นใบเดียว
+-- โดยบิลไม่บอกใครเลย ผลพวงมีสองชั้น:
+--   1. ลูกบ้านโดนเก็บก้อนใหญ่โดยไม่รู้ว่าทำไม
+--   2. ด่าน "หน่วยพุ่ง" เห็นตัวเลขสองเท่าแล้วเด้ง 409 ทั้งที่เลขถูก
+--      พอคนกดยืนยันผ่าน ค่านั้นก็เข้าไปดันค่ากลางของบ้านหลังนี้ถาวร
+--
+-- เก็บไว้เพื่อ (ก) โชว์บนใบเสร็จ (ข) ให้ด่านหน่วยพุ่งหารก่อนเทียบเกณฑ์
+-- DEFAULT 1 = บิลทุกใบที่มีอยู่ถือว่าคาบเดือนเดียว ซึ่งจริงสำหรับกรณีปกติ
+-- ─────────────────────────────────────────────────────────────────────
+ALTER TABLE `bills`
+  ADD COLUMN `period_months` tinyint unsigned NOT NULL DEFAULT 1
+    COMMENT 'บิลใบนี้ครอบคลุมกี่เดือน (>1 = มีเดือนที่ไม่ได้จดคั่นอยู่)'
+    AFTER `due_date`;
+
+-- ─────────────────────────────────────────────────────────────────────
+-- 3) meter_readings.read_confidence — ความมั่นใจของหลักที่อ่อนที่สุด
+--
+-- vision service ส่งค่านี้มาอยู่แล้ว (main.py คืน min ของทุกหลัก ไม่ใช่ค่าเฉลี่ย)
+-- แต่ฝั่ง NestJS เคยรับมาแล้วส่งต่อให้หน้าเว็บเฉย ๆ ไม่ได้เอามาเป็นด่านเลย
+--
+-- ต้องเก็บลงฐานข้อมูลด้วย ไม่ใช่แค่ตรวจแล้วทิ้ง เพราะเป็นหลักฐานว่าตอนออกบิล
+-- ระบบมั่นใจแค่ไหน — เวลาลูกบ้านมาทักท้วงย้อนหลังจะได้ไล่ดูได้ว่าใบไหนน่าสงสัย
+--
+-- decimal(4,3) = 0.000-1.000 พอดีกับช่วงของ confidence
+-- NULL = กรอกเลขเอง ไม่ได้ผ่าน OCR (เหมือน meter_digits)
+-- ─────────────────────────────────────────────────────────────────────
+ALTER TABLE `meter_readings`
+  ADD COLUMN `read_confidence` decimal(4,3) DEFAULT NULL
+    COMMENT 'ความมั่นใจของหลักที่อ่อนที่สุดจาก OCR (NULL = กรอกมือ)'
+    AFTER `meter_digits`;
+
+-- ─────────────────────────────────────────────────────────────────────
+-- 4) villages.payment_due_days — ให้เวลาจ่ายกี่วันนับจากวันจด
+--
+-- แต่ละหมู่บ้านเก็บเงินคนละแบบ (บางที่เก็บวันประชุมประจำเดือน บางที่ให้ไปจ่าย
+-- ที่บ้านผู้ใหญ่บ้านเมื่อไหร่ก็ได้) ค่าคงที่ทั้งระบบจึงไม่ตรงกับของจริงสักที่
+--
+-- NULL = ใช้ค่ากลาง 15 วัน ซึ่งเป็นรอบที่พบบ่อยที่สุด
+-- ─────────────────────────────────────────────────────────────────────
+ALTER TABLE `villages`
+  ADD COLUMN `payment_due_days` smallint unsigned DEFAULT NULL
+    COMMENT 'ให้เวลาชำระกี่วันนับจากวันจดมิเตอร์ (NULL = ใช้ค่ากลาง 15)'
+    AFTER `meter_pitch_m`;
+
+-- ตรวจผลลัพธ์
+SELECT 'bills' AS `table`, `COLUMN_NAME`, `COLUMN_TYPE`, `IS_NULLABLE`
+FROM information_schema.COLUMNS
+WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'bills'
+  AND COLUMN_NAME IN ('due_date', 'period_months')
+UNION ALL
+SELECT 'meter_readings', `COLUMN_NAME`, `COLUMN_TYPE`, `IS_NULLABLE`
+FROM information_schema.COLUMNS
+WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'meter_readings'
+  AND COLUMN_NAME = 'read_confidence'
+UNION ALL
+SELECT 'villages', `COLUMN_NAME`, `COLUMN_TYPE`, `IS_NULLABLE`
+FROM information_schema.COLUMNS
+WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'villages'
+  AND COLUMN_NAME = 'payment_due_days';

@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Post } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { MemberPortalService } from 'src/service/member-portal.service';
+import { ReportsService } from 'src/service/reports.service';
 import { CreateReportDto } from 'src/dto/create-report.dto';
 import { Roles } from 'src/auth/roles.decorator';
 import { CurrentUser } from 'src/auth/current-user.decorator';
@@ -16,7 +17,10 @@ import type { JwtPayload } from 'src/auth/auth.constants';
 @ApiBearerAuth()
 @Controller('me')
 export class MemberPortalController {
-  constructor(private readonly memberPortalService: MemberPortalService) {}
+  constructor(
+    private readonly memberPortalService: MemberPortalService,
+    private readonly reportsService: ReportsService,
+  ) {}
 
   @Get('houses')
   @ApiOperation({ summary: 'บ้านทั้งหมดที่บัญชีนี้ดูแล' })
@@ -38,21 +42,34 @@ export class MemberPortalController {
     return this.memberPortalService.getAdminContacts();
   }
 
+  // ==========================================
+  // เรื่องที่แจ้ง — ฝั่งแอดมินอยู่ที่ ReportsController → /reports
+  // ==========================================
+
   @Get('reports')
-  @ApiOperation({
-    summary: 'เรื่องที่แจ้งไว้ของบ้านตัวเอง พร้อมคำตอบจากผู้ดูแล',
-  })
-  getMyReports(@CurrentUser() user: JwtPayload) {
-    return this.memberPortalService.getMyReports(user.sub);
+  @ApiOperation({ summary: 'เรื่องที่บ้านของตัวเองแจ้งไว้ (ใหม่สุดก่อน)' })
+  async getMyReports(@CurrentUser() user: JwtPayload) {
+    const memberIds = await this.memberPortalService.getLinkedMemberIds(
+      user.sub,
+    );
+    return await this.reportsService.findAllForMembers(memberIds);
   }
 
   @Post('reports')
-  @ApiOperation({ summary: 'แจ้งเรื่องใหม่ไปหาผู้ดูแลหมู่บ้าน' })
-  createMyReport(
+  @ApiOperation({ summary: 'แจ้งเรื่องใหม่ถึงผู้ดูแลหมู่บ้าน' })
+  async createMyReport(
     @CurrentUser() user: JwtPayload,
     @Body() createReportDto: CreateReportDto,
   ) {
-    // account_id อ่านจาก token เสมอ ไม่รับจาก body (กันแจ้งแทนบัญชีคนอื่น)
-    return this.memberPortalService.createMyReport(user.sub, createReportDto);
+    // ส่งรายการบ้านที่บัญชีนี้ดูแลเข้าไปให้ service เทียบกับ members_id ที่ส่งมา
+    // ถ้าไม่ส่งไป ลูกบ้านจะยิง members_id ของบ้านคนอื่นมาแจ้งแทนได้
+    const allowedMemberIds = await this.memberPortalService.getLinkedMemberIds(
+      user.sub,
+    );
+    return await this.reportsService.create(
+      user.sub,
+      createReportDto,
+      allowedMemberIds,
+    );
   }
 }

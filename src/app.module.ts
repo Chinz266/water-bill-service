@@ -1,3 +1,5 @@
+import { HealthController } from './controller/health.controller';
+import { LoginRateLimitGuard } from './security/login-rate-limit.guard';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { HttpModule } from '@nestjs/axios';
@@ -5,8 +7,6 @@ import { JwtModule, JwtModuleOptions } from '@nestjs/jwt';
 import { APP_GUARD } from '@nestjs/core';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { RolesGuard } from './auth/roles.guard';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
 import { AdminController } from './controller/admin.controller';
 import { AdminService } from './service/admin.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -23,8 +23,12 @@ import { VillagesController } from './controller/villages.controller';
 import { VillagesService } from './service/villages.service';
 import { VillageEntity } from './entity/village.entity';
 import { MeterReadingEntity } from './entity/meter-reading.entity';
+import { BillDeletionLogEntity } from './entity/bill-deletion-log.entity';
 import { MeterReadingsController } from './controller/meter-readings.controller';
 import { MeterReadingsService } from './service/meter-readings.service';
+import { MeterPhotoService } from './service/meter-photo.service';
+import { ScanBatchService } from './service/scan-batch.service';
+import { PhotoMetadataService } from './service/photo-metadata.service';
 import { BillEntity } from './entity/bill.entity';
 import { BillsService } from './service/bills.service';
 import { BillsController } from './controller/bills.controller';
@@ -41,21 +45,49 @@ import {
   DistrictEntity,
   SubdistrictEntity,
 } from './entity/location.entity';
+import { ScheduleModule } from '@nestjs/schedule';
+import { BillArrearsEntity } from './entity/bill-arrears.entity';
+import { MeterEntity } from './entity/meter.entity';
+import { TenancyEntity } from './entity/tenancy.entity';
+import { ReadingFlagEntity } from './entity/reading-flag.entity';
+import { MeterReadingLogEntity } from './entity/meter-reading-log.entity';
+import { UnassignedReadingEntity } from './entity/unassigned-reading.entity';
+import { MetersController } from './controller/meters.controller';
+import { MetersService } from './service/meters.service';
+import { TenanciesController } from './controller/tenancies.controller';
+import { TenancyService } from './service/tenancy.service';
+import { UnassignedReadingsController } from './controller/unassigned-readings.controller';
+import { UnassignedReadingsService } from './service/unassigned-readings.service';
+import { AuditController } from './controller/audit.controller';
+import { ReadingFlagsService } from './service/reading-flags.service';
+import { ReadingLogsService } from './service/reading-logs.service';
+import { HousekeepingService } from './service/housekeeping.service';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     HttpModule,
-    TypeOrmModule.forRoot({
-      type: 'mysql',
-      host: 'localhost',
-      port: 3306,
-      username: 'root', // ใส่ username ของ MySQL
-      password: '', // ใส่ password ของ MySQL
-      database: 'water-bill-db', // ใส่ชื่อฐานข้อมูลที่คุณสร้างไว้
-      charset: 'utf8mb4', // 🌟 บังคับ connection เป็น utf8mb4 ไม่งั้นภาษาไทยจะเก็บเป็น ????? (เพี้ยน)
-      entities: [__dirname + '/**/*.entity{.ts,.js}'],
-      synchronize: false, 
+    // ⏰ งานที่ต้องเกิดขึ้นเองแม้ไม่มีใครเข้าเว็บทั้งเดือน (ดู HousekeepingService)
+    //    พื้นที่ดิสก์ต่างจากสถานะบิลตรงที่ไม่มีใคร "เปิดดู" มันหมดเงียบ ๆ
+    //    แล้วระบบล้มตอนที่ยังต้องใช้งานอยู่
+    ScheduleModule.forRoot(),
+    // 🌟 อ่านค่าต่อ DB จาก .env ที่เดียว — ค่าเดิม hardcode ไว้ตรงนี้ ทำให้ .env กับ
+    //    scripts/migrate.ts ชี้คนละฐานข้อมูลได้โดยไม่มีอะไรเตือน (migration ลงที่หนึ่ง
+    //    แอปอ่านอีกที่หนึ่ง แล้วโผล่เป็น ER_BAD_FIELD_ERROR ตอนใช้งาน)
+    //    ค่า default ตรงกับของเดิมทุกตัว เครื่องที่ไม่มี .env จึงยังรันได้เหมือนเดิม
+    TypeOrmModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        type: 'mysql' as const,
+        host: config.get<string>('DB_HOST') ?? 'localhost',
+        port: Number(config.get<string>('DB_PORT') ?? 3306),
+        username: config.get<string>('DB_USERNAME') ?? 'root',
+        password: config.get<string>('DB_PASSWORD') ?? '',
+        database: config.get<string>('DB_DATABASE') ?? 'water-bill-db',
+        charset: 'utf8mb4', // 🌟 บังคับ connection เป็น utf8mb4 ไม่งั้นภาษาไทยจะเก็บเป็น ????? (เพี้ยน)
+        entities: [__dirname + '/**/*.entity{.ts,.js}'],
+        synchronize: false, // ห้ามเปิด — ดู docs/known-issues.md
+      }),
     }),
     // 🔐 อ่านกุญแจเซ็น JWT จาก .env — ถ้าไม่ตั้งไว้จะโยน error ตั้งแต่ตอน boot
     //    ตั้งใจให้ล้มเลยดีกว่าปล่อยให้ระบบรันด้วย secret ค่าว่าง ซึ่งใครก็ปลอม token ได้
@@ -81,9 +113,9 @@ import {
     }),
     TypeOrmModule.forFeature([
       AdminEntity,
+      AccountEntity,
       MemberEntity,
       AccountMemberEntity,
-      AccountEntity,
       WaterRateEntity,
       VillageEntity,
       MeterReadingEntity,
@@ -92,10 +124,17 @@ import {
       ProvinceEntity,
       DistrictEntity,
       SubdistrictEntity,
+      BillArrearsEntity,
+      MeterEntity,
+      TenancyEntity,
+      ReadingFlagEntity,
+      MeterReadingLogEntity,
+      UnassignedReadingEntity,
+      BillDeletionLogEntity,
     ]),
   ],
   controllers: [
-    AppController,
+    HealthController,
     AdminController,
     MemberController,
     WaterRatesController,
@@ -106,18 +145,31 @@ import {
     MemberPortalController,
     LocationsController,
     ReportsController,
+    MetersController,
+    TenanciesController,
+    UnassignedReadingsController,
+    AuditController,
   ],
   providers: [
-    AppService,
+    LoginRateLimitGuard,
     AdminService,
     MemberService,
     WaterRatesService,
     VillagesService,
     MeterReadingsService,
+    MeterPhotoService,
+    ScanBatchService,
+    PhotoMetadataService,
     BillsService,
     AuthService,
     MemberPortalService,
     ReportsService,
+    MetersService,
+    TenancyService,
+    UnassignedReadingsService,
+    ReadingFlagsService,
+    ReadingLogsService,
+    HousekeepingService,
     // 🔐 ตั้ง guard เป็น global = ทุก endpoint ปิดไว้ก่อนเป็นค่าเริ่มต้น
     //    route ไหนที่ตั้งใจเปิดสาธารณะต้องแปะ @Public() เอง
     //    ปลอดภัยกว่าไล่แปะ guard ทีละ route เพราะ "ลืมแปะ = ปิด" ไม่ใช่ "ลืมแปะ = เปิดทิ้ง"

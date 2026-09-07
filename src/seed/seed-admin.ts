@@ -28,10 +28,20 @@ const dataSource = new DataSource({
   synchronize: false,
 });
 
+// runner.query() คืนค่าเป็น any — ห่อไว้ที่เดียวเพื่อระบุชนิดของแถวที่ SHOW ... คืนมา
+async function queryRows<TRow>(
+  runner: QueryRunner,
+  sql: string,
+): Promise<TRow[]> {
+  const rows: unknown = await runner.query(sql);
+  return Array.isArray(rows) ? (rows as TRow[]) : [];
+}
+
 // db/water-bill-db.sql เก่ากว่า AdminEntity อยู่ 5 คอลัมน์ (ดู README หัวข้อ "การแก้ schema ที่ทำไปแล้ว")
 // เติมให้ครบก่อน ไม่งั้น repository จะพังด้วย Unknown column 'AdminEntity.email'
 async function ensureAdminSchema(runner: QueryRunner): Promise<void> {
-  const columns: { Field: string }[] = await runner.query(
+  const columns = await queryRows<{ Field: string }>(
+    runner,
     'SHOW COLUMNS FROM `admin`',
   );
   const has = (name: string) => columns.some((column) => column.Field === name);
@@ -79,19 +89,10 @@ async function ensureAdminSchema(runner: QueryRunner): Promise<void> {
     );
   }
 
-  // 🌟 รูปโปรไฟล์เก็บเป็น base64 data URL จึงต้องเป็น MEDIUMTEXT (varchar สั้นเกิน)
-  //    ⚠️ ต้องเติมคอลัมน์นี้ "ก่อน" ที่สคริปต์จะเรียก repository.find() ข้างล่าง
-  //    ไม่งั้น TypeORM จะ SELECT คอลัมน์ photo แล้วพังด้วย Unknown column ตั้งแต่ยังกู้อะไรไม่ได้เลย
-  if (!has('photo')) {
-    console.log('🔧 เพิ่มคอลัมน์ admin.photo');
-    await runner.query(
-      'ALTER TABLE `admin` ADD COLUMN `photo` mediumtext NULL',
-    );
-  }
-
   // 🌟 bcrypt hash ยาว 60 ตัว แต่ schema เดิมเป็น varchar(45)
   //    ถ้าไม่ขยายก่อน MySQL จะตัด hash ทิ้งเงียบ ๆ แล้วล็อกอินไม่ผ่านตลอดกาล
-  const passwordColumn: { Type: string }[] = await runner.query(
+  const passwordColumn = await queryRows<{ Type: string }>(
+    runner,
     "SHOW COLUMNS FROM `admin` WHERE Field = 'password'",
   );
   if (passwordColumn[0] && /varchar\((\d+)\)/i.test(passwordColumn[0].Type)) {
@@ -106,7 +107,8 @@ async function ensureAdminSchema(runner: QueryRunner): Promise<void> {
     }
   }
 
-  const indexes: { Key_name: string }[] = await runner.query(
+  const indexes = await queryRows<{ Key_name: string }>(
+    runner,
     'SHOW INDEX FROM `admin`',
   );
   if (!indexes.some((index) => index.Key_name === 'IDX_admin_email')) {
@@ -159,9 +161,16 @@ async function main(): Promise<void> {
     email,
     // เก็บเฉพาะ hash ไม่เก็บรหัสจริง
     password: await bcrypt.hash(password, SALT_ROUNDS),
-    adminRole: 'owner',
     createDate: new Date(),
   });
+
+  // ⚠️ แอดมินคนแรกของระบบต้องเป็น owner — migrate-admin-role.sql ยกผู้ดูแลที่ "มีอยู่แล้ว"
+  //    ขึ้นเป็น owner ให้ แต่บนเครื่องที่ตั้งใหม่ยังไม่มีใครเลยตอนที่ migration นั้นรัน
+  //    ถ้าไม่ตั้งตรงนี้ บัญชีเดียวของระบบจะได้ค่า default 'staff' แล้วแก้บิลย้อนหลังไม่ได้
+  //    ตั้งเฉพาะตอนตารางว่าง — บัญชีที่เปิดทีหลังยังเป็น staff ตามเดิม
+  if ((await repository.count()) === 0) {
+    admin.admin_role = 'owner';
+  }
 
   // ตารางอื่น (water_rates, villages, members, meter_readings) อ้าง create_by = 1 แบบ hardcode
   // เพราะยังไม่มีระบบ login ที่ส่ง id ของแอดมินที่ล็อกอินอยู่จริงมาให้
@@ -177,16 +186,23 @@ async function main(): Promise<void> {
   console.log(`   รหัสผ่าน: ${password}`);
 }
 
-main()
-  .catch((error: unknown) => {
+/** ให้สคริปต์อื่นเรียกได้ (db-setup) — โยน error ต่อ ไม่กลืนไว้เองเหมือนตอนรันเดี่ยว */
+export async function seedAdmin(): Promise<void> {
+  try {
+    await main();
+  } finally {
+    if (dataSource.isInitialized) {
+      await dataSource.destroy();
+    }
+  }
+}
+
+if (require.main === module) {
+  seedAdmin().catch((error: unknown) => {
     console.error(
       '❌ สร้างแอดมินเริ่มต้นไม่สำเร็จ:',
       error instanceof Error ? error.message : error,
     );
     process.exitCode = 1;
-  })
-  .finally(async () => {
-    if (dataSource.isInitialized) {
-      await dataSource.destroy();
-    }
   });
+}

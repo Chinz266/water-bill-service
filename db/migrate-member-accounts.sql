@@ -10,10 +10,15 @@
 -- members_id คอลัมน์เดียวใน admin
 --
 -- รันคำสั่งนี้ครั้งเดียว:
---   mysql -u root water-bill-db < db/migrate-member-accounts.sql
+--   npm run migrate -- db/migrate-member-accounts.sql
 -- =====================================================================
 
-USE `water-bill-db`;
+-- ต้องรันหลังไฟล์นี้ (ตัวรันจัดลำดับให้เองตามบรรทัดนี้ ดู scripts/migrate.ts):
+--   migrate-admin-columns.sql — แก้ชนิด admin.email ที่ไฟล์นี้ MODIFY ต่อ
+-- requires: migrate-admin-columns.sql
+
+-- ฐานข้อมูลมาจาก DB_DATABASE ใน .env (ตัวรันเลือกให้ตอนต่อ) — ไฟล์นี้จึงไม่ USE เอง
+-- รันด้วยมือใน phpMyAdmin/CLI ต้องเลือกฐานข้อมูลก่อน
 
 -- บัญชีลูกบ้านไม่มีอีเมล จึงต้องยอมให้ email เป็น NULL ได้
 -- (UNIQUE KEY เดิมบน email ไม่กระทบ เพราะ MySQL นับ NULL แต่ละแถวเป็นค่าต่างกันเสมอ)
