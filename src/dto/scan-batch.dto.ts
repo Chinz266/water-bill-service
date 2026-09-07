@@ -25,4 +25,17 @@ export class ScanBatchDto {
   })
   @InputValue('integer', { min: 0, max: 2147483647 })
   villages_id?: number;
+
+  @ApiPropertyOptional({
+    description:
+      'วันถ่ายกับพิกัดที่ฝั่งเว็บอ่านจาก EXIF ของ**ไฟล์ต้นฉบับ**ก่อนย่อรูป — ' +
+      'JSON array เรียงตรงลำดับกับ files (index ตรงกัน ใบที่ไม่มีข้อมูลใส่ null ไว้) ' +
+      'ใช้เมื่อไฟล์ที่อัปมาไม่มี EXIF เหลือแล้ว เพราะถูกย่อผ่าน canvas ซึ่งเก็บแต่พิกเซล ' +
+      '⚠️ ค่านี้มาจากฝั่งผู้ใช้ ปลอมได้ — ระบบจึงคง has_exif เป็น false ไว้เสมอเมื่อใช้ค่านี้ ' +
+      'เพื่อให้ด่านที่ต้องการหลักฐานจากตัวไฟล์แยกออกว่าค่าไหนเชื่อถือได้แค่ไหน',
+    example:
+      '[{"captured_at":"2026-09-07T03:12:44.000Z","latitude":14.98339,"longitude":102.09771}]',
+  })
+  @InputValue('text', { maxLength: 100000 })
+  photo_meta?: string;
 }

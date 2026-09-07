@@ -5,15 +5,30 @@ import sharp from 'sharp';
 
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 export const MAX_IMAGE_PIXELS = 40_000_000;
-export const MAX_BATCH_BYTES = 32 * 1024 * 1024;
+/**
+ * ขนาดรวมของรูปทั้งชุดในหนึ่งคำขอ
+ *
+ * storage ด้านล่างเก็บ buffer ของทุกไฟล์ไว้ใน RAM พร้อมกัน ค่านี้จึงคือแรมที่หนึ่ง
+ * คำขอกินได้จริง ไม่ใช่แค่ตัวเลขนโยบาย — ตั้งตาม MAX_FILES × ขีดสูงสุดต่อใบ (300 × 10 MB)
+ * จะกิน 3 GB ต่อคำขอแล้วเซิร์ฟเวอร์ล้ม
+ *
+ * 100 MB มาจาก: หน้าเว็บย่อรูปเหลือ 800px ก่อนอัปอยู่แล้ว (ดู toUploadFile ฝั่ง Angular)
+ * ซึ่งได้ใบละ 60-100 KB ทั้งชุด 300 ใบจึงอยู่ราว 20-30 MB — เผื่อไว้สามเท่าสำหรับ
+ * เว็บเวอร์ชันเก่าที่ยังส่งรูปเต็มใบมา และรูปที่ย่อไม่สำเร็จจนต้องส่งต้นฉบับ
+ *
+ * ลูกบ้านที่ใช้เว็บเวอร์ชันย่อรูปแล้วจะไม่มีวันแตะเพดานนี้
+ */
+export const MAX_BATCH_BYTES = 100 * 1024 * 1024;
 const requestBytes = new WeakMap<object, number>();
 
 export const imageUploadOptions: MulterOptions = {
   limits: {
     fileSize: MAX_IMAGE_BYTES,
     fields: 30,
-    fieldSize: 64 * 1024,
-    parts: 60,
+    // photo_meta ของ 300 ใบเป็น JSON ราว 40 KB — 64 KB เดิมพอดีเกินไปจนเสี่ยง
+    fieldSize: 256 * 1024,
+    // parts = ทุก field + ทุกไฟล์ในคำขอเดียว ต้องคลุม MAX_FILES (300) + fields (30)
+    parts: 340,
   },
   storage: {
     _handleFile(request, file, callback) {

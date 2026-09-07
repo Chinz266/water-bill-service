@@ -9,6 +9,16 @@ import { MeterReadingsService } from './meter-readings.service';
 import { PhotoMetadata, PhotoMetadataService } from './photo-metadata.service';
 import { ScanBatchDto } from '../dto/scan-batch.dto';
 
+/**
+ * วันถ่าย/พิกัดของรูปหนึ่งใบที่ฝั่งเว็บอ่านจากไฟล์ต้นฉบับมาให้ ก่อนย่อรูปจน EXIF หาย
+ * null = ใบนั้นเว็บก็อ่านไม่ได้ หรือไม่ได้ส่งมา
+ */
+type ClientPhotoMeta = {
+  captured_at: Date | null;
+  latitude: number | null;
+  longitude: number | null;
+} | null;
+
 /** ความมั่นใจว่ารูปใบนี้เป็นของบ้านที่เสนอ */
 export type MatchConfidence = 'high' | 'medium' | 'ambiguous' | 'none';
 
@@ -74,7 +84,13 @@ export interface ScanBatchItem {
      */
     meter_digits?: number | null;
   };
-  /** วันเวลา + พิกัดที่อ่านได้จาก EXIF ของไฟล์รูป */
+  /**
+   * วันเวลา + พิกัดของรูปใบนี้
+   *
+   * มาจาก EXIF ของไฟล์เป็นหลัก ช่องที่ไฟล์ไม่มีจะถูกเติมด้วยค่าที่ฝั่งเว็บอ่านจาก
+   * ไฟล์ต้นฉบับก่อนย่อรูป (dto.photo_meta) — `has_exif` บอกว่าตัวไฟล์มี EXIF จริงไหม
+   * ดู withClientMeta()
+   */
   photo_taken: PhotoMetadata;
   confidence: MatchConfidence;
   reason: string;
@@ -119,8 +135,13 @@ export interface ScanBatchItem {
 export class ScanBatchService {
   private readonly logger = new Logger(ScanBatchService.name);
 
-  /** อัปเกินนี้ต่อครั้งไม่ให้ทำ — OCR ทีละใบ ยิ่งเยอะยิ่งกิน RAM และรอนาน */
-  static readonly MAX_FILES = 30;
+  /**
+   * อัปเกินนี้ต่อครั้งไม่ให้ทำ — OCR ทีละใบ ยิ่งเยอะยิ่งกิน RAM และรอนาน
+   *
+   * ⚠️ ขยับเลขนี้ต้องขยับ `parts` กับ `MAX_BATCH_BYTES` ใน security/upload.ts ตามด้วย
+   *    ไม่งั้น multer จะตัดคำขอทิ้งก่อนถึงด่านนี้ แล้วผู้ใช้จะได้ 413 แทนข้อความที่อ่านรู้เรื่อง
+   */
+  static readonly MAX_FILES = 300;
 
   /**
    * ═══ มิเตอร์ที่ติดกันบนกำแพงเดียวกัน (cluster) ═══
@@ -302,6 +323,8 @@ export class ScanBatchService {
 
     // OCR ทีละใบตามลำดับ ไม่ยิงขนานเพราะ vision service โหลดโมเดลตัวเดียว
     // ยิงพร้อมกัน 30 ใบมีแต่จะแย่ง GPU/CPU กันเองแล้วช้ากว่าเดิม
+    const clientMeta = ScanBatchService.parseClientMeta(dto.photo_meta);
+
     const results: ScanBatchItem[] = [];
     for (const [index, file] of files.entries()) {
       results.push(
@@ -315,6 +338,7 @@ export class ScanBatchService {
           usedCaptureTimes,
           dto,
           farM,
+          clientMeta,
         ),
       );
     }
@@ -467,6 +491,76 @@ export class ScanBatchService {
     }
   }
 
+  /**
+   * แกะ photo_meta ที่ฝั่งเว็บส่งมา — ค่าที่ใช้ไม่ได้ให้กลายเป็น null ทีละใบ ไม่ใช่ทิ้งทั้งชุด
+   *
+   * JSON ที่พังทั้งก้อน (เว็บเวอร์ชันเก่า, ถูกตัดกลางทาง) แปลว่า "ไม่มีข้อมูลจากเว็บ"
+   * ไม่ใช่เหตุให้ทั้งคำขอล้ม — ทุกใบยังอ่าน EXIF จากไฟล์ได้ตามปกติ
+   */
+  private static parseClientMeta(raw: string | undefined): ClientPhotoMeta[] {
+    if (!raw) return [];
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return [];
+    }
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed.map((entry): ClientPhotoMeta => {
+      if (typeof entry !== 'object' || entry === null) return null;
+      const row = entry as Record<string, unknown>;
+
+      const at =
+        typeof row.captured_at === 'string' ? new Date(row.captured_at) : null;
+      const lat = typeof row.latitude === 'number' ? row.latitude : null;
+      const lng = typeof row.longitude === 'number' ? row.longitude : null;
+
+      return {
+        captured_at: at && !Number.isNaN(at.getTime()) ? at : null,
+        // นอกพิสัยพิกัดจริง = ค่าเสีย ไม่ใช่ตำแหน่งบนโลก (0,0 กลางมหาสมุทรก็เข้าข่าย)
+        latitude: lat !== null && Math.abs(lat) <= 90 && lat !== 0 ? lat : null,
+        longitude:
+          lng !== null && Math.abs(lng) <= 180 && lng !== 0 ? lng : null,
+      };
+    });
+  }
+
+  /**
+   * เติมวันถ่าย/พิกัดจากฝั่งเว็บ **เฉพาะช่องที่ไฟล์ไม่มีให้**
+   *
+   * ═══ ทำไมต้องเติม ═══
+   *
+   * เว็บย่อรูปก่อนอัปเพื่อไม่ให้ 300 ใบกิน RAM เป็นกิกะไบต์ แต่ canvas เก็บแต่พิกเซล
+   * EXIF หายไปทั้งก้อนตั้งแต่ตอนวาด ไฟล์ที่มาถึงที่นี่จึงไม่มีวันถ่ายและพิกัดเหลือ
+   * ทั้งที่เว็บอ่านค่าพวกนั้นจากไฟล์ต้นฉบับไว้แล้วตั้งแต่ตอนเลือกรูป
+   *
+   * ไม่เติมแล้วการจับคู่บ้านด้วยพิกัดจะตายทั้งระบบ คนต้องเลือกบ้านเองทุกใบ
+   *
+   * ═══ ทำไม has_exif ยังเป็น false ═══
+   *
+   * ค่าจากเว็บพิมพ์อะไรลงไปก็ได้ ไม่ใช่หลักฐานจากตัวไฟล์ has_exif จึงต้องคงความหมายเดิม
+   * ไว้ว่า "ไฟล์นี้มี EXIF ติดมาไหม" ด่านที่ต้องการหลักฐานจากไฟล์จริงจะได้แยกออก
+   * (ค่าที่ใช้ตัดสินตอนออกบิลก็มาจาก DTO ของผู้ใช้อยู่แล้วเช่นกัน — ดู parseLocation)
+   *
+   * ไฟล์ที่มี EXIF ครบชนะเสมอ ค่าจากเว็บเข้ามาแทนที่ของจริงไม่ได้
+   */
+  private static withClientMeta(
+    fromFile: PhotoMetadata,
+    fromClient: ClientPhotoMeta,
+  ): PhotoMetadata {
+    if (!fromClient) return fromFile;
+
+    return {
+      has_exif: fromFile.has_exif,
+      captured_at: fromFile.captured_at ?? fromClient.captured_at,
+      // พิกัดต้องมาเป็นคู่ — ครึ่งเดียวจากไฟล์อีกครึ่งจากเว็บคือจุดที่ไม่มีอยู่จริง
+      ...(fromFile.latitude !== null && fromFile.longitude !== null
+        ? { latitude: fromFile.latitude, longitude: fromFile.longitude }
+        : { latitude: fromClient.latitude, longitude: fromClient.longitude }),
+    };
+  }
+
   /** อ่านรูปหนึ่งใบแล้วจัดอันดับว่าน่าจะเป็นของบ้านไหน */
   private async analyzeOne(
     file: Express.Multer.File,
@@ -480,10 +574,15 @@ export class ScanBatchService {
     dto: ScanBatchDto,
     /** รัศมี "ไกลจนน่าสงสัย" ของหมู่บ้านที่กำลังสแกน — ดู farThresholdFor() */
     farM: number,
+    /** วันถ่าย/พิกัดที่ฝั่งเว็บอ่านจากไฟล์ต้นฉบับมาให้ — index ตรงกับลำดับไฟล์ */
+    clientMeta: ClientPhotoMeta[],
   ): Promise<ScanBatchItem> {
     // อ่าน EXIF จาก buffer ต้นฉบับก่อนใคร — ต้องมาก่อน OCR ด้วย
     // เพราะถ้า vision service ล่ม อย่างน้อยวันเวลาและพิกัดยังได้ติดมือกลับไป
-    const photo_taken = this.photoMetadataService.read(file.buffer);
+    const photo_taken = ScanBatchService.withClientMeta(
+      this.photoMetadataService.read(file.buffer),
+      clientMeta[index],
+    );
     const warnings = this.checkCaptureDate(photo_taken, dto);
 
     // รูปใบนี้เคยถูกใช้ออกบิลไปแล้วหรือยัง — เตือนตั้งแต่ตรงนี้ ไม่ต้องรอไปโดน

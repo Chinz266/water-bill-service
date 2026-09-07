@@ -332,6 +332,77 @@ describe('ScanBatchService — จับคู่รูปกับบ้าน�
       expect(res.results[0].suggestion).toBeNull();
     });
 
+    /**
+     * เว็บย่อรูปก่อนอัปเพื่อไม่ให้ 300 ใบกิน RAM เป็นกิกะไบต์ canvas เก็บแต่พิกเซล
+     * EXIF จึงหายทั้งก้อน — ถ้าไม่รับค่าที่เว็บอ่านไว้ก่อนย่อ การจับคู่ด้วยพิกัดจะตายทั้งระบบ
+     */
+    it('ไฟล์ไม่มี EXIF แต่เว็บส่งพิกัดที่อ่านจากต้นฉบับมา → ใช้จับคู่บ้านได้', async () => {
+      memberRepository.find.mockResolvedValue([
+        member(1, '12/3', { latitude: 14.98, longitude: 102.0977 }),
+        member(2, '45', { latitude: 14.988, longitude: 102.0977 }),
+        member(3, '7/1'),
+      ]);
+      billsService.previousUnitsForMembers.mockResolvedValue(
+        AMBIGUOUS_BASELINE(),
+      );
+      photoMetadataService.read.mockReturnValue(NO_EXIF);
+      ocrReturns('1260');
+
+      const res = await service.analyze([fakeFile()], {
+        ...dto,
+        photo_meta: JSON.stringify([{ latitude: 14.98, longitude: 102.0977 }]),
+      });
+      const item = res.results[0];
+
+      expect(item.suggestion?.house_no).toBe('12/3');
+      expect(item.photo_taken.latitude).toBe(14.98);
+      // ค่ามาจากผู้ใช้ ไม่ใช่หลักฐานในไฟล์ — has_exif ต้องคงความหมายเดิมไว้
+      expect(item.photo_taken.has_exif).toBe(false);
+    });
+
+    it('ไฟล์มี EXIF อยู่แล้ว → ค่าจากเว็บทับของจริงไม่ได้', async () => {
+      memberRepository.find.mockResolvedValue([
+        member(1, '12/3', { latitude: 14.98, longitude: 102.0977 }),
+        member(2, '45', { latitude: 14.988, longitude: 102.0977 }),
+        member(3, '7/1'),
+      ]);
+      billsService.previousUnitsForMembers.mockResolvedValue(
+        AMBIGUOUS_BASELINE(),
+      );
+      photoMetadataService.read.mockReturnValue({
+        has_exif: true,
+        captured_at: null,
+        latitude: 14.98,
+        longitude: 102.0977,
+      });
+      ocrReturns('1260');
+
+      const res = await service.analyze([fakeFile()], {
+        ...dto,
+        // พิกัดคนละที่กับในไฟล์ — ถ้าทับได้ บ้านที่เสนอจะเปลี่ยนเป็น 45
+        photo_meta: JSON.stringify([{ latitude: 14.988, longitude: 102.0977 }]),
+      });
+
+      expect(res.results[0].suggestion?.house_no).toBe('12/3');
+      expect(res.results[0].photo_taken.has_exif).toBe(true);
+    });
+
+    it('photo_meta ที่พังทั้งก้อน → ไม่ล้มทั้งคำขอ แค่ถือว่าไม่มีค่าจากเว็บ', async () => {
+      billsService.previousUnitsForMembers.mockResolvedValue(
+        baselineOf({ 1: { previous_unit: 1250, usage_history: [9, 8, 10] } }),
+      );
+      photoMetadataService.read.mockReturnValue(NO_EXIF);
+      ocrReturns('1260');
+
+      const res = await service.analyze([fakeFile()], {
+        ...dto,
+        photo_meta: 'ไม่ใช่ JSON',
+      });
+
+      expect(res.results[0].suggestion?.house_no).toBe('12/3');
+      expect(res.results[0].photo_taken.latitude).toBeNull();
+    });
+
     it('รูปไม่มีพิกัด → บอกไปตรง ๆ ว่าใช้ตำแหน่งช่วยตัดไม่ได้', async () => {
       billsService.previousUnitsForMembers.mockResolvedValue(
         AMBIGUOUS_BASELINE(),
@@ -683,10 +754,15 @@ describe('ScanBatchService — จับคู่รูปกับบ้าน�
       );
     });
 
-    it('เกิน 30 รูป → 400 และไม่เรียก OCR สักครั้ง', async () => {
-      const tooMany = Array.from({ length: 31 }, () => fakeFile());
+    it('เกินเพดานจำนวนรูป → 400 และไม่เรียก OCR สักครั้ง', async () => {
+      const tooMany = Array.from(
+        { length: ScanBatchService.MAX_FILES + 1 },
+        () => fakeFile(),
+      );
 
-      await expect(service.analyze(tooMany, dto)).rejects.toThrow(/ไม่เกิน 30/);
+      await expect(service.analyze(tooMany, dto)).rejects.toThrow(
+        new RegExp(`ไม่เกิน ${ScanBatchService.MAX_FILES}`),
+      );
       expect(meterReadingsService.extractMeterUnit).not.toHaveBeenCalled();
     });
 

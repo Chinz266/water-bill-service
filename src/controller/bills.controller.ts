@@ -104,11 +104,16 @@ export class BillsController {
         files: {
           type: 'array',
           items: { type: 'string', format: 'binary' },
-          description: 'รูปมิเตอร์หลายใบ (สูงสุด 30 รูปต่อครั้ง)',
+          description: `รูปมิเตอร์หลายใบ (สูงสุด ${ScanBatchService.MAX_FILES} รูปต่อครั้ง)`,
         },
         billing_month: { type: 'string', example: '08' },
         billing_year: { type: 'string', example: '2026' },
         villages_id: { type: 'number', example: 1 },
+        photo_meta: {
+          type: 'string',
+          description:
+            'JSON array ของวันถ่าย/พิกัดที่อ่านจากไฟล์ต้นฉบับก่อนย่อรูป เรียงตรงลำดับกับ files',
+        },
       },
     },
   })

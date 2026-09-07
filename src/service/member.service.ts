@@ -438,7 +438,9 @@ export class MemberService {
   ): Promise<{ members_id: number; old_unit: number; new_unit: number }> {
     const memberId = Number(dto?.id);
     if (!Number.isInteger(memberId) || memberId <= 0) {
-      throw new UnprocessableEntityException('ต้องระบุ ID ของลูกบ้านที่จะแก้ครับ');
+      throw new UnprocessableEntityException(
+        'ต้องระบุ ID ของลูกบ้านที่จะแก้ครับ',
+      );
     }
 
     const newUnit = Number(dto?.initial_meter_unit);
@@ -457,7 +459,9 @@ export class MemberService {
 
     const member = await this.memberRepository.findOneBy({ id: memberId });
     if (!member) {
-      throw new UnprocessableEntityException(`ไม่พบลูกบ้านที่มี ID: ${memberId}`);
+      throw new UnprocessableEntityException(
+        `ไม่พบลูกบ้านที่มี ID: ${memberId}`,
+      );
     }
 
     // การจดครั้งแรกสุดของบ้านหลังนี้คือเลขตั้งต้น เรียงด้วย id ไม่ใช่ reading_date
@@ -483,7 +487,8 @@ export class MemberService {
     }
 
     const oldUnit = Number(baseline.meter_unit);
-    if (oldUnit === newUnit) return { members_id: memberId, old_unit: oldUnit, new_unit: newUnit };
+    if (oldUnit === newUnit)
+      return { members_id: memberId, old_unit: oldUnit, new_unit: newUnit };
 
     await this.meterReadingRepository.manager.transaction(async (manager) => {
       await manager.update(MeterReadingEntity, baseline.id, {
@@ -514,5 +519,4 @@ export class MemberService {
 
     return { members_id: memberId, old_unit: oldUnit, new_unit: newUnit };
   }
-
 }

@@ -10,6 +10,7 @@ import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 import FormData from 'form-data';
+import sharp from 'sharp';
 import { MeterReadingEntity } from '../entity/meter-reading.entity'; // เช็ค Path ให้ตรงกับโครงสร้างโฟลเดอร์ของคุณนะครับ
 import { AdminEntity } from '../entity/admin.entity';
 import { MemberEntity } from '../entity/member.entity';
@@ -147,6 +148,52 @@ export class MeterReadingsService {
     };
   }
 
+  /**
+   * ความละเอียดที่โมเดลใช้จริง — ต้องตรงกับ IMG_SIZE ใน meter-vision-service/main.py
+   * (`model.predict(image, imgsz=IMG_SIZE, ...)`) ฝั่งนั้นเปลี่ยนเมื่อไหร่ ต้องตามที่นี่ด้วย
+   */
+  private static readonly VISION_IMG_SIZE = 800;
+
+  /**
+   * ย่อรูปก่อนส่งเข้า vision service
+   *
+   * ═══ ทำไมย่อแล้วไม่เสียความแม่น ═══
+   *
+   * YOLO ย่อภาพเป็น imgsz (800px) ก่อน predict ทุกครั้งอยู่แล้ว พิกเซลที่เกินจากนั้น
+   * เดินทางข้ามเครือข่ายไปเพื่อโดนทิ้ง — จ่ายทั้ง RAM ฝั่งนี้ เวลาอัป และเวลารอ
+   * โดยไม่ได้ความแม่นกลับมาสักนิด รูปมิเตอร์จากมือถือ 3-4 MB เหลือราว 60-100 KB
+   *
+   * ⚠️ ห้ามย่อต่ำกว่า VISION_IMG_SIZE — เล็กกว่านั้นโมเดลจะขยายกลับ
+   *    ความคมที่หายไปตอนย่อคือความแม่นที่หายไปจริง ๆ (withoutEnlargement กันขาขยาย)
+   *
+   * rotate() = หมุนตาม EXIF ให้ตรงกับที่คนเห็นตอนถ่าย — Pillow ฝั่ง Python ไม่หมุนให้เอง
+   * รูปที่ตะแคงเข้าโมเดลคือเลขที่อ่านไม่ออก
+   *
+   * crop_box ที่ได้กลับมาเป็นสัดส่วน 0-1 (ดู normalizeCropBox) จึงไม่ผูกกับขนาดที่ส่งไป
+   * และ EXIF ถูกอ่านไปก่อนหน้านี้แล้วด้วย buffer ต้นฉบับ ที่นี่จึงย่อได้ไม่กระทบใคร
+   *
+   * ย่อไม่สำเร็จให้ส่งต้นฉบับไปแทน — ช้ากว่าเดิมดีกว่าอ่านมิเตอร์ไม่ได้เลย
+   */
+  private async toVisionImage(imageBuffer: Buffer): Promise<Buffer> {
+    try {
+      return await sharp(imageBuffer)
+        .rotate()
+        .resize({
+          width: MeterReadingsService.VISION_IMG_SIZE,
+          height: MeterReadingsService.VISION_IMG_SIZE,
+          fit: 'inside',
+          withoutEnlargement: true,
+        })
+        .jpeg({ quality: 85 })
+        .toBuffer();
+    } catch (error) {
+      this.logger.warn(
+        `ย่อรูปก่อนส่งเข้า vision ไม่สำเร็จ ใช้ต้นฉบับแทน: ${(error as Error).message}`,
+      );
+      return imageBuffer;
+    }
+  }
+
   async extractMeterUnit(imageBuffer: Buffer) {
     const startTime = Date.now();
     this.logger.log('Starting water meter reading via YOLO vision service...');
@@ -158,7 +205,7 @@ export class MeterReadingsService {
     try {
       // เตรียม multipart form ส่งรูปไปให้ Python service
       const form = new FormData();
-      form.append('file', imageBuffer, {
+      form.append('file', await this.toVisionImage(imageBuffer), {
         filename: 'meter.jpg',
         contentType: 'application/octet-stream',
       });

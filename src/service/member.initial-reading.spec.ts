@@ -1,10 +1,12 @@
-import { Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 import { UnprocessableEntityException } from '@nestjs/common';
 import { MemberService } from './member.service';
 import { MemberEntity } from '../entity/member.entity';
 import { MeterReadingEntity } from '../entity/meter-reading.entity';
 import { MeterPhotoService } from './meter-photo.service';
 import { ReadingLogsService } from './reading-logs.service';
+import { UpdateInitialReadingDto } from '../dto/update-initial-reading.dto';
+import { PendingReadingLog } from './reading-logs.service';
 
 /**
  * แก้เลขมิเตอร์ตั้งต้น — ด่านที่ห้ามหลุด
@@ -19,9 +21,17 @@ import { ReadingLogsService } from './reading-logs.service';
 describe('MemberService.updateInitialReading', () => {
   let service: MemberService;
   let memberRepository: { findOneBy: jest.Mock };
-  let meterReadingRepository: { find: jest.Mock; manager: any };
-  let readingLogs: { record: jest.Mock };
-  let updated: { id: number; patch: any } | null;
+  let meterReadingRepository: {
+    find: jest.Mock;
+    manager: { transaction: jest.Mock };
+  };
+  let readingLogs: {
+    record: jest.Mock<Promise<unknown>, [EntityManager, PendingReadingLog]>;
+  };
+  let updated: {
+    id: number;
+    patch: Partial<MeterReadingEntity>;
+  } | null;
 
   beforeEach(() => {
     updated = null;
@@ -30,12 +40,20 @@ describe('MemberService.updateInitialReading', () => {
     meterReadingRepository = {
       find: jest.fn().mockResolvedValue([{ id: 501, meter_unit: 12500 }]),
       manager: {
-        transaction: jest.fn(async (cb: any) =>
-          cb({
-            update: jest.fn(async (_entity: unknown, id: number, patch: any) => {
-              updated = { id, patch };
-            }),
-          }),
+        transaction: jest.fn(
+          async (cb: (manager: EntityManager) => Promise<unknown>) =>
+            cb({
+              update: jest.fn(
+                (
+                  _entity: unknown,
+                  id: number,
+                  patch: Partial<MeterReadingEntity>,
+                ) => {
+                  updated = { id, patch };
+                  return Promise.resolve();
+                },
+              ),
+            } as unknown as EntityManager),
         ),
       },
     };
@@ -48,8 +66,14 @@ describe('MemberService.updateInitialReading', () => {
     );
   });
 
-  const dto = (over: Partial<Record<string, unknown>> = {}) =>
-    ({ id: 12, initial_meter_unit: 1250, reason: 'พิมพ์เกินหนึ่งหลัก', ...over }) as any;
+  const dto = (
+    over: Partial<UpdateInitialReadingDto> = {},
+  ): UpdateInitialReadingDto => ({
+    id: 12,
+    initial_meter_unit: 1250,
+    reason: 'พิมพ์เกินหนึ่งหลัก',
+    ...over,
+  });
 
   it('แก้เลขได้ และเขียนค่าใหม่ลงการจดครั้งแรก', async () => {
     const result = await service.updateInitialReading(dto());
@@ -85,9 +109,9 @@ describe('MemberService.updateInitialReading', () => {
       { id: 502, meter_unit: 1300 },
     ]);
 
-    await expect(service.updateInitialReading(dto({ initial_meter_unit: 1400 }))).rejects.toThrow(
-      UnprocessableEntityException,
-    );
+    await expect(
+      service.updateInitialReading(dto({ initial_meter_unit: 1400 })),
+    ).rejects.toThrow(UnprocessableEntityException);
     expect(updated).toBeNull();
     expect(readingLogs.record).not.toHaveBeenCalled();
   });
@@ -98,7 +122,9 @@ describe('MemberService.updateInitialReading', () => {
       { id: 502, meter_unit: 1300 },
     ]);
 
-    await expect(service.updateInitialReading(dto({ initial_meter_unit: 1300 }))).resolves.toEqual({
+    await expect(
+      service.updateInitialReading(dto({ initial_meter_unit: 1300 })),
+    ).resolves.toEqual({
       members_id: 12,
       old_unit: 1200,
       new_unit: 1300,
@@ -106,35 +132,43 @@ describe('MemberService.updateInitialReading', () => {
   });
 
   it('ไม่กรอกเหตุผล → ตีกลับ การแก้ที่ไม่มีเหตุผลเท่ากับไม่มีร่องรอย', async () => {
-    await expect(service.updateInitialReading(dto({ reason: '   ' }))).rejects.toThrow(
-      UnprocessableEntityException,
-    );
+    await expect(
+      service.updateInitialReading(dto({ reason: '   ' })),
+    ).rejects.toThrow(UnprocessableEntityException);
     expect(updated).toBeNull();
   });
 
   it('เลขติดลบหรือไม่ใช่จำนวนเต็ม → ตีกลับ', async () => {
-    await expect(service.updateInitialReading(dto({ initial_meter_unit: -5 }))).rejects.toThrow(
-      UnprocessableEntityException,
-    );
-    await expect(service.updateInitialReading(dto({ initial_meter_unit: 12.5 }))).rejects.toThrow(
-      UnprocessableEntityException,
-    );
+    await expect(
+      service.updateInitialReading(dto({ initial_meter_unit: -5 })),
+    ).rejects.toThrow(UnprocessableEntityException);
+    await expect(
+      service.updateInitialReading(dto({ initial_meter_unit: 12.5 })),
+    ).rejects.toThrow(UnprocessableEntityException);
   });
 
   it('ไม่พบลูกบ้าน หรือบ้านนั้นยังไม่เคยจดเลย → ตีกลับ', async () => {
     memberRepository.findOneBy.mockResolvedValue(null);
-    await expect(service.updateInitialReading(dto())).rejects.toThrow(UnprocessableEntityException);
+    await expect(service.updateInitialReading(dto())).rejects.toThrow(
+      UnprocessableEntityException,
+    );
 
     memberRepository.findOneBy.mockResolvedValue({ id: 12 });
     meterReadingRepository.find.mockResolvedValue([]);
-    await expect(service.updateInitialReading(dto())).rejects.toThrow(UnprocessableEntityException);
+    await expect(service.updateInitialReading(dto())).rejects.toThrow(
+      UnprocessableEntityException,
+    );
   });
 
   /** กดบันทึกโดยไม่ได้แก้อะไร ไม่ควรมี log ขยะที่บอกว่า "แก้จาก 1250 เป็น 1250" */
   it('เลขเดิมเท่าเลขใหม่ → ไม่แตะฐานข้อมูล และไม่เขียน log', async () => {
-    meterReadingRepository.find.mockResolvedValue([{ id: 501, meter_unit: 1250 }]);
+    meterReadingRepository.find.mockResolvedValue([
+      { id: 501, meter_unit: 1250 },
+    ]);
 
-    await expect(service.updateInitialReading(dto({ initial_meter_unit: 1250 }))).resolves.toEqual({
+    await expect(
+      service.updateInitialReading(dto({ initial_meter_unit: 1250 })),
+    ).resolves.toEqual({
       members_id: 12,
       old_unit: 1250,
       new_unit: 1250,
