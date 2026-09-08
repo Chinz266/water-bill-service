@@ -48,14 +48,11 @@ import {
 import { ScheduleModule } from '@nestjs/schedule';
 import { BillArrearsEntity } from './entity/bill-arrears.entity';
 import { MeterEntity } from './entity/meter.entity';
-import { TenancyEntity } from './entity/tenancy.entity';
 import { ReadingFlagEntity } from './entity/reading-flag.entity';
 import { MeterReadingLogEntity } from './entity/meter-reading-log.entity';
 import { UnassignedReadingEntity } from './entity/unassigned-reading.entity';
 import { MetersController } from './controller/meters.controller';
 import { MetersService } from './service/meters.service';
-import { TenanciesController } from './controller/tenancies.controller';
-import { TenancyService } from './service/tenancy.service';
 import { UnassignedReadingsController } from './controller/unassigned-readings.controller';
 import { UnassignedReadingsService } from './service/unassigned-readings.service';
 import { AuditController } from './controller/audit.controller';
@@ -126,7 +123,6 @@ import { HousekeepingService } from './service/housekeeping.service';
       SubdistrictEntity,
       BillArrearsEntity,
       MeterEntity,
-      TenancyEntity,
       ReadingFlagEntity,
       MeterReadingLogEntity,
       UnassignedReadingEntity,
@@ -146,7 +142,6 @@ import { HousekeepingService } from './service/housekeeping.service';
     LocationsController,
     ReportsController,
     MetersController,
-    TenanciesController,
     UnassignedReadingsController,
     AuditController,
   ],
@@ -165,7 +160,6 @@ import { HousekeepingService } from './service/housekeeping.service';
     MemberPortalService,
     ReportsService,
     MetersService,
-    TenancyService,
     UnassignedReadingsService,
     ReadingFlagsService,
     ReadingLogsService,

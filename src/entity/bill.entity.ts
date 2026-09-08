@@ -78,7 +78,13 @@ export class BillEntity {
   @Column({ type: 'tinyint', unsigned: true, default: 1 })
   period_months!: number;
 
-  /** ผู้อยู่อาศัยที่บิลใบนี้เรียกเก็บจาก — NULL = เจ้าของอยู่เอง หรือบิลก่อนมีตาราง tenancies */
+  /**
+   * ผู้อยู่อาศัยที่บิลใบนี้เรียกเก็บจาก — ใบใหม่เป็น NULL เสมอ
+   *
+   * ⚠️ ระบบผู้อยู่อาศัย (tenancies) ถูกถอดออกแล้วทั้ง controller/service/entity
+   *    คอลัมน์นี้กับตาราง tenancies ยังอยู่ในฐานข้อมูล เพราะบิลที่ออกไปแล้วอ้างถึงอยู่
+   *    ลบทิ้งเมื่อไหร่คือทำลายหลักฐานว่าใบนั้นเก็บจากใคร
+   */
   @Column({ type: 'int', nullable: true })
   tenancy_id!: number | null;
 
@@ -87,6 +93,8 @@ export class BillEntity {
    *
    * ต่างจากบิลปกติตรงที่ due_date เป็นวันย้ายออกเลย ไม่ยืดตาม payment_due_days
    * ของหมู่บ้าน (คนที่ย้ายออกไปแล้วตามเก็บทีหลังแทบไม่ได้)
+   *
+   * ⚠️ ใบใหม่เป็น 0 เสมอตั้งแต่ถอดระบบผู้อยู่อาศัยออก — ค่า 1 มีได้เฉพาะบิลเก่า
    */
   @Column({ type: 'tinyint', default: 0 })
   is_final!: number;

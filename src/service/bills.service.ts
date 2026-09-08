@@ -2018,21 +2018,7 @@ export class BillsService {
    * ตรวจให้ผ่านก่อนค่อยเขียน แล้วเขียนทั้งสองตารางในทรานแซกชันเดียว
    * ถ้าล้มกลางทางจะไม่เหลือ meter_readings ค้าง และไม่มีบิลที่ไม่มีการจดรองรับ
    */
-  async createFromScan(
-    dto: CreateBillFromScanDto,
-    /**
-     * ส่วนเพิ่มสำหรับบิลปิดยอดตอนย้ายออก — เรียกจาก TenancyService เท่านั้น
-     *
-     * แยกเป็นพารามิเตอร์ที่สอง ไม่ปนใน dto เพราะสามค่านี้ต้องไม่มีทางมาจาก body
-     * ของผู้ใช้ได้เลย (ตั้ง is_final เองจากหน้าเว็บ = ออกบิลที่ข้ามรอบชำระได้)
-     */
-    options?: {
-      is_final?: boolean;
-      tenancy_id?: number | null;
-      /** ทับ due_date ที่คิดจากรอบชำระของหมู่บ้าน — บิลปิดยอดครบกำหนดวันย้ายออกเลย */
-      due_date?: Date;
-    },
-  ) {
+  async createFromScan(dto: CreateBillFromScanDto) {
     // ═══ ยิงซ้ำจาก offline queue = คืนบิลใบเดิม ไม่ใช่ error ═══
     //
     // แอปที่ทำงานหน้างานเก็บการจดไว้ในเครื่องแล้วยิงตอนมีเน็ต ปัญหาคือ
@@ -2206,10 +2192,12 @@ export class BillsService {
             // เติมศูนย์แล้วจาก prepareBill ไม่ใช่ค่าดิบจาก dto
             billing_month: prep.billing_month,
             billing_year: prep.billing_year,
-            due_date: options?.due_date ?? prep.due_date,
+            due_date: prep.due_date,
             period_months: prep.period_months,
-            tenancy_id: options?.tenancy_id ?? null,
-            is_final: options?.is_final ? 1 : 0,
+            // สองคอลัมน์นี้เหลือไว้ให้บิลเก่าที่ออกตอนยังมีระบบผู้อยู่อาศัย — ใบใหม่
+            // เป็น NULL/0 เสมอ เพราะไม่มีทางออกบิลปิดยอดตอนย้ายออกอีกแล้ว
+            tenancy_id: null,
+            is_final: 0,
             payment_status: 'Pending' as const,
             create_by: dto.create_by,
             create_date: now,
