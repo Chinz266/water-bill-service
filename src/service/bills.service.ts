@@ -22,6 +22,7 @@ import { MeterEntity } from '../entity/meter.entity';
 import { BillDeletionLogEntity } from '../entity/bill-deletion-log.entity';
 import { CreateBillDto } from 'src/dto/create-bill.dto';
 import { CreateBillFromScanDto } from 'src/dto/create-bill-from-scan.dto';
+import { OCR_CONFIDENCE_THRESHOLD } from './measurement.constants';
 import { MeterPhotoService } from './meter-photo.service';
 import { PhotoMetadataService } from './photo-metadata.service';
 import { PendingFlag, ReadingFlagsService } from './reading-flags.service';
@@ -934,8 +935,14 @@ export class BillsService {
    *
    * 0.85 มาจากชุดทดสอบของ vision service — เคสที่อ่านผิดจริงทั้ง 4/4 เคส
    * ได้ค่าต่ำกว่า 0.85 ทุกตัว (ดูคอมเมนต์ใน meter-vision-service/main.py)
+   *
+   * การทดลองภาคสนาม (`meter-bill.xlsx` 200 ภาพ) ยืนยันเส้นนี้ซ้ำอีกทาง — ภาพที่
+   * conf ≥ 0.85 อ่านถูก 15 จาก 16 ภาพ (93.8%) ส่วนที่ต่ำกว่าเกณฑ์อ่านถูก 18 จาก 59 ภาพ
+   * (30.5%) เส้นนี้จึงแยกภาพถูก/ผิดได้จริง ไม่ใช่แค่ค่าที่ตั้งไว้เฉย ๆ
+   *
+   * อ้างจาก `measurement.constants.ts` เพื่อไม่ให้มีเลข 0.85 ลอยอยู่หลายที่แล้วขยับไม่พร้อมกัน
    */
-  static readonly MIN_READ_CONFIDENCE = 0.85;
+  static readonly MIN_READ_CONFIDENCE = OCR_CONFIDENCE_THRESHOLD;
 
   /**
    * กัน OCR อ่านผิดค่าโดยจำนวนหลักไม่เปลี่ยน (1250 → 1258)

@@ -94,12 +94,15 @@ describe('RelativeDirectionUtil — ระยะและทิศทาง', ()
   });
 
   /**
-   * เขตที่ถือว่า "GPS แยกมิเตอร์ไม่ออก" — กว้าง 10 ม. ไม่ใช่ 30 ซม.
+   * เขตที่ถือว่า "GPS แยกมิเตอร์ไม่ออก" — กว้าง 15 ม. ไม่ใช่ 30 ซม.
    *
    * ธงนี้ดูระยะ **ที่วัดได้** ไม่ใช่ระยะจริง เกณฑ์จึงต้องกว้างเท่าความคลาดของเครื่อง
    * (3-10 ม. ที่โล่ง, 10-30 ม. ใต้ชายคา) ไม่ใช่เท่าระยะห่างจริงของมิเตอร์บนกำแพง
+   *
+   * 15 ม. มาจากการทดลองภาคสนาม (`meter-bill.xlsx` ตารางที่ 4.9) — มีเพียง 2 คู่จาก 10 คู่
+   * ที่หมุดห่างกันพ้นเขตนี้ ดู `GPS_POLICY.directionTrustM` ใน measurement.constants.ts
    */
-  describe('เขตที่ GPS แยกไม่ออก (10 เมตร)', () => {
+  describe('เขตที่ GPS แยกไม่ออก (15 เมตร)', () => {
     it('ระยะสั้นกว่าเกณฑ์ เข้าข่าย "อาจเป็นมิเตอร์คนละตัวที่ GPS แยกไม่ออก"', () => {
       expect(
         RelativeDirectionUtil.compare(BASE, offset(0, 0.25))?.within_threshold,
@@ -111,11 +114,15 @@ describe('RelativeDirectionUtil — ระยะและทิศทาง', ()
       expect(
         RelativeDirectionUtil.compare(BASE, offset(0, 8))?.within_threshold,
       ).toBe(true);
-    });
-
-    it('ระยะ > 10 ม. ถือเป็นคนละจุดจริง ๆ พ้นเขตที่ GPS แยกไม่ออก', () => {
+      // 12 ม. เคยหลุดเขตตอนเกณฑ์เป็น 10 ม. — ภาคสนามชี้ว่ายังอยู่ในเขตที่ทิศเป็นการเดา
       expect(
         RelativeDirectionUtil.compare(BASE, offset(0, 12))?.within_threshold,
+      ).toBe(true);
+    });
+
+    it('ระยะ > 15 ม. ถือเป็นคนละจุดจริง ๆ พ้นเขตที่ GPS แยกไม่ออก', () => {
+      expect(
+        RelativeDirectionUtil.compare(BASE, offset(0, 18))?.within_threshold,
       ).toBe(false);
       expect(
         RelativeDirectionUtil.compare(BASE, offset(0, 40))?.within_threshold,
@@ -127,8 +134,8 @@ describe('RelativeDirectionUtil — ระยะและทิศทาง', ()
      * ต้องเป็นคนละด้านของเส้นเสมอ ไม่งั้นจะมีช่วงที่บอกว่าทั้งแยกไม่ออกและเชื่อทิศได้
      */
     it('ต่ำกว่าเส้น = แยกไม่ออก · เหนือเส้น = เชื่อทิศได้ ไม่มีช่วงที่ขัดกันเอง', () => {
-      const inside = RelativeDirectionUtil.compare(BASE, offset(0, 8));
-      const outside = RelativeDirectionUtil.compare(BASE, offset(0, 12));
+      const inside = RelativeDirectionUtil.compare(BASE, offset(0, 12));
+      const outside = RelativeDirectionUtil.compare(BASE, offset(0, 18));
 
       expect(inside?.within_threshold).toBe(true);
       expect(inside?.reliable).toBe(false);
@@ -148,17 +155,27 @@ describe('RelativeDirectionUtil — ระยะและทิศทาง', ()
       expect(near?.reliable).toBe(false);
     });
 
-    it('ระยะ 8 ม. ยังไม่ถึงเกณฑ์ 10 ม. → reliable เป็น false', () => {
-      // เขตที่ GPS บอกซ้าย/ขวาไม่ได้ครอบถึง 10 ม. ต่ำกว่านั้นทิศเป็นเสียงรบกวน
+    it('ระยะ 8 ม. ยังไม่ถึงเกณฑ์ 15 ม. → reliable เป็น false', () => {
+      // เขตที่ GPS บอกซ้าย/ขวาไม่ได้ครอบถึง 15 ม. ต่ำกว่านั้นทิศเป็นเสียงรบกวน
       expect(RelativeDirectionUtil.compare(BASE, offset(0, 8))?.reliable).toBe(
         false,
       );
     });
 
-    it('ระยะ ≥ 10 ม. → ติดธง reliable ตามเกณฑ์ที่เจ้าของระบบเลือกไว้', () => {
-      // ⚠️ 10 ม. เป็นค่าที่เลือกเอง ไม่ใช่ค่าที่ตารางชี้ (ตารางชี้ 20 ม.) ที่ 12 ม. ทิศถูก 86.6%
-      // ห้ามเอาไปตัดสินว่าเป็นบ้านไหน — ตัวที่ตอบได้คือ sequence_index
+    /**
+     * เคสที่เปลี่ยนพฤติกรรมจริงจากผลการทดลอง — 12 ม. เคยติดธง reliable ตอนเกณฑ์เป็น 10 ม.
+     * ภาคสนามชี้ว่าเขตที่เชื่อไม่ได้กว้างถึง 15 ม. ระยะนี้จึงต้องเงียบ ไม่ใช่ขึ้นป้าย
+     */
+    it('ระยะ 12 ม. ยังอยู่ในเขตที่ภาคสนามชี้ว่าเชื่อไม่ได้ → reliable เป็น false', () => {
       expect(RelativeDirectionUtil.compare(BASE, offset(0, 12))?.reliable).toBe(
+        false,
+      );
+    });
+
+    it('ระยะ ≥ 15 ม. → ติดธง reliable ตามเกณฑ์ที่วัดมาจากภาคสนาม', () => {
+      // ⚠️ 15 ม. มาจากการทดลอง 10 คู่ (ตารางที่ 4.9) การจำลองชี้ 20 ม. ป้ายในช่วง 15-20 ม.
+      // จึงยังผิดได้ ห้ามเอาไปตัดสินว่าเป็นบ้านไหน — ตัวที่ตอบได้คือ sequence_index
+      expect(RelativeDirectionUtil.compare(BASE, offset(0, 18))?.reliable).toBe(
         true,
       );
     });
